@@ -1,0 +1,320 @@
+{
+  "users": [
+    {
+      "id": "user-admin",
+      "username": "admin",
+      "password": "$2a$10$.ivQYTyi4Be3JSwuipmwleobgBxo.SYOgslW3WKxDkSBcxnACxSbe",
+      "isAdmin": true
+    },
+    {
+      "id": "user-guest",
+      "username": "guest",
+      "password": "$2a$10$cOvyAl1BY3swkVKKoWbWF./dJNGNz3IzfAuhWplY9kNHb8I71WA2O",
+      "isAdmin": false
+    }
+  ],
+  "rankLists": [
+    {
+      "id": "default",
+      "title": "热门榜单",
+      "type": "sequence",
+      "items": [
+        {
+          "id": "2c37a452-0aa4-4dde-9d18-5a24c1666d1e",
+          "name": "最强选手"
+        },
+        {
+          "id": "4bde631d-2312-44c0-8686-79f16fc87d1d",
+          "name": "人气作品"
+        },
+        {
+          "id": "ab253e9c-be30-48b0-b605-e64e3791281e",
+          "name": "最佳案例"
+        },
+        {
+          "id": "51877246-4591-409d-a86c-308521bc38e1",
+          "name": "爆款项目"
+        }
+      ]
+    },
+    {
+      "id": "ba4eae22-48a3-4e02-87c1-3ff1ccad733e",
+      "title": "1234",
+      "type": "firepower",
+      "items": [
+        {
+          "id": "6b7c89b3-221a-45ca-91b7-2b3751a78ff1",
+          "name": "1"
+        },
+        {
+          "id": "a0ff3b1f-a494-40b0-a9b5-35f3e95b4147",
+          "name": "2"
+        },
+        {
+          "id": "adbfe028-e8c3-4f2e-af95-3ada04224750",
+          "name": "3"
+        },
+        {
+          "id": "9b9ee332-c948-4bf7-8b31-1ebe6f2c5178",
+          "name": "4"
+        }
+      ]
+    }
+  ],
+  "proposals": [
+    {
+      "id": "8a68352f-5548-49dd-98d7-692a8cddab57",
+      "listId": "default",
+      "type": "insert",
+      "itemId": null,
+      "itemName": "全能小能手",
+      "fromIndex": null,
+      "toIndex": 0,
+      "reason": "新选项插入请求",
+      "createdBy": "user-admin",
+      "createdByName": "admin",
+      "agreeCount": 1,
+      "rejectCount": 0,
+      "votes": [
+        {
+          "userId": "user-admin",
+          "vote": 1
+        }
+      ],
+      "status": "pending",
+      "createdAt": "2026-05-09T03:33:46.889Z"
+    },
+    {
+      "id": "11a52862-08be-4025-b1fb-bfe78d76038d",
+      "listId": "default",
+      "type": "move",
+      "itemId": "2c37a452-0aa4-4dde-9d18-5a24c1666d1e",
+      "itemName": "最强选手",
+      "fromIndex": 0,
+      "toIndex": 4,
+      "reason": "拖拽变更请求",
+      "createdBy": "user-admin",
+      "createdByName": "admin",
+      "agreeCount": 1,
+      "rejectCount": 0,
+      "votes": [
+        {
+          "userId": "user-admin",
+          "vote": 1
+        }
+      ],
+      "status": "pending",
+      "createdAt": "2026-05-09T03:35:58.413Z"
+    },
+    {
+      "id": "208268f1-f981-47fc-8856-eb4502c50f4d",
+      "listId": "default",
+      "type": "move",
+      "itemId": "2c37a452-0aa4-4dde-9d18-5a24c1666d1e",
+      "itemName": "最强选手",
+      "fromIndex": 0,
+      "toIndex": 4,
+      "reason": "拖拽变更请求",
+      "createdBy": "user-admin",
+      "createdByName": "admin",
+      "agreeCount": 1,
+      "rejectCount": 0,
+      "votes": [
+        {
+          "userId": "user-admin",
+          "vote": 1
+        }
+      ],
+      "status": "pending",
+      "createdAt": "2026-05-09T03:36:00.311Z"
+    },
+    {
+      "id": "cffee087-3d06-4b82-95c9-d71db27c35d2",
+      "listId": "default",
+      "type": "move",
+      "itemId": "2c37a452-0aa4-4dde-9d18-5a24c1666d1e",
+      "itemName": "最强选手",
+      "fromIndex": 0,
+      "toIndex": 3,
+      "reason": "拖拽变更请求",
+      "createdBy": "user-admin",
+      "createdByName": "admin",
+      "agreeCount": 1,
+      "rejectCount": 0,
+      "votes": [
+        {
+          "userId": "user-admin",
+          "vote": 1
+        }
+      ],
+      "status": "pending",
+      "createdAt": "2026-05-09T03:36:30.485Z"
+    },
+    {
+      "id": "6b6fd4a2-0fa3-4f14-bd7e-641948205068",
+      "listId": "default",
+      "type": "move",
+      "itemId": "2c37a452-0aa4-4dde-9d18-5a24c1666d1e",
+      "itemName": "最强选手",
+      "fromIndex": 0,
+      "toIndex": 4,
+      "reason": "拖拽变更请求",
+      "createdBy": "user-admin",
+      "createdByName": "admin",
+      "agreeCount": 1,
+      "rejectCount": 0,
+      "votes": [
+        {
+          "userId": "user-admin",
+          "vote": 1
+        }
+      ],
+      "status": "pending",
+      "createdAt": "2026-05-09T03:36:30.802Z"
+    },
+    {
+      "id": "eac1c150-67aa-406c-8580-26c5137c0b4e",
+      "listId": "default",
+      "type": "move",
+      "itemId": "2c37a452-0aa4-4dde-9d18-5a24c1666d1e",
+      "itemName": "最强选手",
+      "fromIndex": 0,
+      "toIndex": 1,
+      "reason": "拖拽变更请求",
+      "createdBy": "user-admin",
+      "createdByName": "admin",
+      "agreeCount": 1,
+      "rejectCount": 0,
+      "votes": [
+        {
+          "userId": "user-admin",
+          "vote": 1
+        }
+      ],
+      "status": "pending",
+      "createdAt": "2026-05-09T04:23:08.971Z"
+    },
+    {
+      "id": "85ef845e-3edc-40ad-a365-c9988bc60df3",
+      "listId": "default",
+      "type": "move",
+      "itemId": "51877246-4591-409d-a86c-308521bc38e1",
+      "itemName": "爆款项目",
+      "fromIndex": 3,
+      "toIndex": 1,
+      "reason": "拖拽变更请求",
+      "createdBy": "user-admin",
+      "createdByName": "admin",
+      "agreeCount": 1,
+      "rejectCount": 0,
+      "votes": [
+        {
+          "userId": "user-admin",
+          "vote": 1
+        }
+      ],
+      "status": "pending",
+      "createdAt": "2026-05-09T04:23:13.819Z"
+    },
+    {
+      "id": "ef5675d9-d110-46f2-aae1-780bce153b2b",
+      "listId": "default",
+      "type": "move",
+      "itemId": "2c37a452-0aa4-4dde-9d18-5a24c1666d1e",
+      "itemName": "最强选手",
+      "fromIndex": 0,
+      "toIndex": 2,
+      "reason": "拖拽变更请求",
+      "createdBy": "user-admin",
+      "createdByName": "admin",
+      "agreeCount": 1,
+      "rejectCount": 0,
+      "votes": [
+        {
+          "userId": "user-admin",
+          "vote": 1
+        }
+      ],
+      "status": "pending",
+      "createdAt": "2026-05-09T04:23:16.971Z"
+    },
+    {
+      "id": "039cce6a-d068-4c02-9cbe-ca6f08580cc5",
+      "listId": "ba4eae22-48a3-4e02-87c1-3ff1ccad733e",
+      "type": "move",
+      "itemId": "a0ff3b1f-a494-40b0-a9b5-35f3e95b4147",
+      "itemName": "2",
+      "fromIndex": 1,
+      "toIndex": 0,
+      "reason": "拖拽变更请求",
+      "createdBy": "user-admin",
+      "createdByName": "admin",
+      "agreeCount": 1,
+      "rejectCount": 0,
+      "votes": [
+        {
+          "userId": "user-admin",
+          "vote": 1
+        }
+      ],
+      "status": "pending",
+      "createdAt": "2026-05-09T04:24:08.032Z"
+    },
+    {
+      "id": "d23d3a86-05fa-4559-8e73-490ff468e412",
+      "listId": "ba4eae22-48a3-4e02-87c1-3ff1ccad733e",
+      "type": "move",
+      "itemId": "adbfe028-e8c3-4f2e-af95-3ada04224750",
+      "itemName": "3",
+      "fromIndex": 2,
+      "toIndex": 0,
+      "reason": "拖拽变更请求",
+      "createdBy": "user-admin",
+      "createdByName": "admin",
+      "agreeCount": 1,
+      "rejectCount": 0,
+      "votes": [
+        {
+          "userId": "user-admin",
+          "vote": 1
+        }
+      ],
+      "status": "pending",
+      "createdAt": "2026-05-09T04:24:18.895Z"
+    },
+    {
+      "id": "e8f9c6ce-c317-4905-acac-ceff02394101",
+      "listId": "ba4eae22-48a3-4e02-87c1-3ff1ccad733e",
+      "type": "move",
+      "itemId": "9b9ee332-c948-4bf7-8b31-1ebe6f2c5178",
+      "itemName": "4",
+      "fromIndex": 3,
+      "toIndex": 1,
+      "reason": "拖拽变更请求",
+      "createdBy": "user-admin",
+      "createdByName": "admin",
+      "agreeCount": 0,
+      "rejectCount": 0,
+      "votes": [],
+      "status": "pending",
+      "createdAt": "2026-05-09T04:24:21.839Z"
+    },
+    {
+      "id": "57b6438f-56ef-4f7a-b6a7-9ba197a41f42",
+      "listId": "default",
+      "type": "insert",
+      "itemId": null,
+      "itemName": "123",
+      "fromIndex": null,
+      "toIndex": 0,
+      "reason": "新选项插入请求",
+      "createdBy": "user-admin",
+      "createdByName": "admin",
+      "agreeCount": 0,
+      "rejectCount": 0,
+      "votes": [],
+      "status": "pending",
+      "createdAt": "2026-05-09T04:52:59.865Z"
+    }
+  ]
+}
