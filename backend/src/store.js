@@ -5,10 +5,19 @@ const { v4: uuid } = require('uuid');
 
 const filePath = path.join(__dirname, '../data/store.json');
 const DEFAULT_TIERS = ['夯', '顶级', '人上人', 'NPC', '拉完了'];
-const SETTLE_INTERVAL_MS = 60 * 60 * 1000;
 
 function isImageValue(value) {
-  return /^https?:\/\/.+\.(png|jpe?g|gif|webp|avif|svg)(\?.*)?$/i.test(value || '');
+  return /^(https?:\/\/.+\.(png|jpe?g|gif|webp|avif|svg)(\?.*)?|data:image\/[^;]+;base64,.+)$/i.test(
+    value || ''
+  );
+}
+
+function nextHourAfter(value) {
+  const date = value ? new Date(value) : new Date();
+  if (Number.isNaN(date.getTime())) return nextHourAfter(new Date().toISOString());
+  date.setMinutes(0, 0, 0);
+  date.setHours(date.getHours() + 1);
+  return date;
 }
 
 function normalizeOption(item, index = 0) {
@@ -18,7 +27,8 @@ function normalizeOption(item, index = 0) {
     name: raw.name || raw.itemName || '新选项',
     kind: raw.kind || (raw.imageUrl ? 'image' : 'text'),
     imageUrl: raw.imageUrl || raw.itemImageUrl || '',
-    tierIndex: Number.isFinite(raw.tierIndex) ? raw.tierIndex : Math.min(index, DEFAULT_TIERS.length - 1)
+    tierIndex: Number.isFinite(raw.tierIndex) ? raw.tierIndex : Math.min(index, DEFAULT_TIERS.length - 1),
+    order: Number.isFinite(raw.order) ? raw.order : index
   };
 }
 
@@ -28,7 +38,7 @@ function normalizeList(list) {
     ...list,
     id: list.id || uuid(),
     title: list.title || '从夯到拉榜单',
-    description: list.description || '大家一起排序，每小时根据意愿更新一次。',
+    description: list.description || '大家一起排序，每个整点根据意愿更新一次。',
     coverImageUrl: list.coverImageUrl || '',
     type: 'firepower',
     tiers,
@@ -52,31 +62,26 @@ function defaultData() {
         username: 'admin',
         password: bcrypt.hashSync('admin123', 10),
         isAdmin: true
-      },
-      {
-        id: 'user-guest',
-        username: 'guest',
-        password: bcrypt.hashSync('guest123', 10),
-        isAdmin: false
       }
     ],
     rankLists: [
       normalizeList({
         id: 'default',
         title: '从夯到拉总榜',
-        description: '把选项拖进你认为合适的档位，整点后系统按大家的意愿更新。',
+        description: '拖动选项到你认为合适的档位，提交后系统会在下个整点结算。',
         coverImageUrl: '',
         items: [
-          { id: uuid(), name: '最强选手', tierIndex: 0 },
-          { id: uuid(), name: '人气作品', tierIndex: 1 },
-          { id: uuid(), name: '最佳案例', tierIndex: 2 },
-          { id: uuid(), name: '爆款项目', tierIndex: 3 },
-          { id: uuid(), name: '离谱操作', tierIndex: 4 }
+          { id: uuid(), name: '最强选手', tierIndex: 0, order: 0 },
+          { id: uuid(), name: '人气作品', tierIndex: 1, order: 0 },
+          { id: uuid(), name: '最佳搭档', tierIndex: 2, order: 0 },
+          { id: uuid(), name: '普通项目', tierIndex: 3, order: 0 },
+          { id: uuid(), name: '离谱操作', tierIndex: 4, order: 0 }
         ]
       })
     ],
     submissions: [],
     candidates: [],
+    comments: [],
     proposals: []
   };
 }
@@ -93,8 +98,25 @@ function writeStore(data) {
   fs.writeFileSync(filePath, JSON.stringify(data, null, 2), 'utf8');
 }
 
+function recomputeListHeat(data, listId) {
+  const list = data.rankLists.find((item) => item.id === listId);
+  if (!list) return;
+  list.heat =
+    data.submissions.filter((submission) => submission.listId === listId).length +
+    data.candidates
+      .filter((candidate) => candidate.listId === listId)
+      .reduce((total, candidate) => total + Math.max(1, candidate.supportUserIds.length), 0) +
+    data.comments
+      .filter((comment) => comment.listId === listId)
+      .reduce((total, comment) => total + 1 + comment.likeUserIds.length, 0);
+}
+
 function migrateData(data) {
   let changed = false;
+  if (!Array.isArray(data.users)) {
+    data.users = defaultData().users;
+    changed = true;
+  }
   if (!Array.isArray(data.rankLists)) {
     data.rankLists = defaultData().rankLists;
     changed = true;
@@ -107,6 +129,11 @@ function migrateData(data) {
     data.candidates = [];
     changed = true;
   }
+  if (!Array.isArray(data.comments)) {
+    data.comments = [];
+    changed = true;
+  }
+
   data.rankLists = data.rankLists.map((list) => {
     const normalized = normalizeList(list);
     if (JSON.stringify(normalized) !== JSON.stringify(list)) changed = true;
@@ -121,6 +148,12 @@ function migrateData(data) {
     status: candidate.status || 'pending',
     createdAt: candidate.createdAt || new Date().toISOString()
   }));
+  data.comments = data.comments.map((comment) => ({
+    ...comment,
+    id: comment.id || uuid(),
+    likeUserIds: Array.isArray(comment.likeUserIds) ? comment.likeUserIds : [],
+    createdAt: comment.createdAt || new Date().toISOString()
+  }));
   return { data, changed };
 }
 
@@ -134,7 +167,7 @@ function readRawStore() {
 
 function getDueListIds(data, now = Date.now()) {
   return data.rankLists
-    .filter((list) => now - new Date(list.lastSettledAt).getTime() >= SETTLE_INTERVAL_MS)
+    .filter((list) => nextHourAfter(list.lastSettledAt).getTime() <= now)
     .map((list) => list.id);
 }
 
@@ -147,6 +180,7 @@ function countBy(values) {
 function settleList(data, listId, nowIso = new Date().toISOString()) {
   const list = data.rankLists.find((item) => item.id === listId);
   if (!list) return;
+
   const tierMax = list.tiers.length - 1;
   const submissions = data.submissions.filter(
     (submission) => submission.listId === listId && submission.status === 'pending'
@@ -160,13 +194,13 @@ function settleList(data, listId, nowIso = new Date().toISOString()) {
   });
 
   list.items.forEach((item) => {
-    const targetVotes = submissions
+    const placements = submissions
       .map((submission) => submission.placements.find((placement) => placement.itemId === item.id))
-      .filter(Boolean)
-      .map((placement) => Math.max(0, Math.min(tierMax, placement.tierIndex)));
-    if (targetVotes.length === 0) return;
-    const counts = countBy(targetVotes);
-    const [bestTier] = Array.from(counts.entries()).sort((left, right) => {
+      .filter(Boolean);
+    if (placements.length === 0) return;
+
+    const tierCounts = countBy(placements.map((placement) => Math.max(0, Math.min(tierMax, placement.tierIndex))));
+    const [bestTier] = Array.from(tierCounts.entries()).sort((left, right) => {
       if (right[1] !== left[1]) return right[1] - left[1];
       return Math.abs(left[0] - item.tierIndex) - Math.abs(right[0] - item.tierIndex);
     })[0];
@@ -181,16 +215,32 @@ function settleList(data, listId, nowIso = new Date().toISOString()) {
       )
       .sort((left, right) => right.supportUserIds.length - left.supportUserIds.length)
       .slice(0, 5);
-    accepted.forEach((candidate) => {
+
+    const lastOrder = Math.max(
+      -1,
+      ...list.items.filter((item) => item.tierIndex === tierIndex).map((item) => item.order || 0)
+    );
+
+    accepted.forEach((candidate, index) => {
       list.items.push({
         id: uuid(),
         name: candidate.name,
         kind: candidate.kind,
         imageUrl: candidate.imageUrl,
-        tierIndex
+        tierIndex,
+        order: lastOrder + index + 1
       });
       candidate.status = 'accepted';
       candidate.acceptedAt = nowIso;
+    });
+  });
+
+  list.tiers.forEach((_, tierIndex) => {
+    const tierItems = list.items
+      .filter((item) => item.tierIndex === tierIndex)
+      .sort((left, right) => (left.order || 0) - (right.order || 0));
+    tierItems.forEach((item, index) => {
+      item.order = index;
     });
   });
 
@@ -198,11 +248,7 @@ function settleList(data, listId, nowIso = new Date().toISOString()) {
     submission.status = 'settled';
     submission.settledAt = nowIso;
   });
-  list.heat =
-    data.submissions.filter((submission) => submission.listId === listId).length +
-    data.candidates
-      .filter((candidate) => candidate.listId === listId)
-      .reduce((total, candidate) => total + Math.max(1, candidate.supportUserIds.length), 0);
+  recomputeListHeat(data, listId);
   list.lastSettledAt = nowIso;
 }
 
@@ -248,14 +294,23 @@ function getAllLists() {
       itemCount: list.items.length,
       pendingCandidateCount: data.candidates.filter(
         (candidate) => candidate.listId === list.id && candidate.status === 'pending'
-      ).length
+      ).length,
+      commentCount: data.comments.filter((comment) => comment.listId === list.id).length
     }))
     .sort((left, right) => right.heat - left.heat);
 }
 
 function getListById(id) {
   const data = readStore();
-  return data.rankLists.find((list) => list.id === id) || null;
+  const list = data.rankLists.find((item) => item.id === id);
+  if (!list) return null;
+  return {
+    ...list,
+    items: [...list.items].sort((left, right) => {
+      if (left.tierIndex !== right.tierIndex) return left.tierIndex - right.tierIndex;
+      return (left.order || 0) - (right.order || 0);
+    })
+  };
 }
 
 function createList({ title, description, coverImageUrl, items }) {
@@ -283,10 +338,29 @@ function updateList(id, updates) {
   return list;
 }
 
+function normalizeCandidatePayload(list, candidate, user) {
+  const rawValue = String(candidate.imageUrl || candidate.name || '').trim();
+  const imageUrl = candidate.imageUrl || (isImageValue(rawValue) ? rawValue : '');
+  return {
+    id: uuid(),
+    listId: list.id,
+    tierIndex: Math.max(0, Math.min(list.tiers.length - 1, Number(candidate.tierIndex))),
+    name: candidate.name || (imageUrl ? '图片选项' : '新选项'),
+    kind: imageUrl ? 'image' : 'text',
+    imageUrl,
+    createdBy: user.id,
+    createdByName: user.username,
+    supportUserIds: [user.id],
+    status: 'pending',
+    createdAt: new Date().toISOString()
+  };
+}
+
 function createSubmission(listId, payload, user) {
   const data = readStore();
   const list = data.rankLists.find((item) => item.id === listId);
   if (!list) return null;
+
   const tierMax = list.tiers.length - 1;
   const validItemIds = new Set(list.items.map((item) => item.id));
   const submission = {
@@ -301,12 +375,32 @@ function createSubmission(listId, payload, user) {
         tierIndex: Math.max(0, Math.min(tierMax, Number(placement.tierIndex)))
       })),
     deleteItemIds: (payload.deleteItemIds || []).filter((itemId) => validItemIds.has(itemId)),
+    candidateIds: [],
+    supportCandidateIds: [],
     status: 'pending',
     createdAt: new Date().toISOString()
   };
+
+  (payload.supportCandidateIds || []).forEach((candidateId) => {
+    const candidate = data.candidates.find(
+      (item) => item.id === candidateId && item.listId === listId && item.status === 'pending'
+    );
+    if (!candidate) return;
+    if (!candidate.supportUserIds.includes(user.id)) {
+      candidate.supportUserIds.push(user.id);
+    }
+    submission.supportCandidateIds.push(candidate.id);
+  });
+
+  (payload.candidates || []).forEach((candidate) => {
+    if (!String(candidate.name || candidate.imageUrl || '').trim()) return;
+    const created = normalizeCandidatePayload(list, candidate, user);
+    data.candidates.push(created);
+    submission.candidateIds.push(created.id);
+  });
+
   data.submissions.push(submission);
-  const listRef = data.rankLists.find((item) => item.id === listId);
-  listRef.heat += 1;
+  list.heat += 1;
   writeStore(data);
   return submission;
 }
@@ -315,21 +409,7 @@ function createCandidate(listId, payload, user) {
   const data = readStore();
   const list = data.rankLists.find((item) => item.id === listId);
   if (!list) return null;
-  const rawValue = (payload.imageUrl || payload.name || '').trim();
-  const imageUrl = payload.imageUrl || (isImageValue(rawValue) ? rawValue : '');
-  const candidate = {
-    id: uuid(),
-    listId,
-    tierIndex: Math.max(0, Math.min(list.tiers.length - 1, Number(payload.tierIndex))),
-    name: payload.name || (imageUrl ? '图片选项' : '新选项'),
-    kind: imageUrl ? 'image' : 'text',
-    imageUrl,
-    createdBy: user.id,
-    createdByName: user.username,
-    supportUserIds: [user.id],
-    status: 'pending',
-    createdAt: new Date().toISOString()
-  };
+  const candidate = normalizeCandidatePayload(list, payload, user);
   data.candidates.push(candidate);
   list.heat += 1;
   writeStore(data);
@@ -347,6 +427,250 @@ function supportCandidate(candidateId, user) {
   }
   writeStore(data);
   return candidate;
+}
+
+function createComment(listId, content, user) {
+  const data = readStore();
+  const list = data.rankLists.find((item) => item.id === listId);
+  if (!list) return null;
+  const comment = {
+    id: uuid(),
+    listId,
+    userId: user.id,
+    username: user.username,
+    content: String(content || '').trim(),
+    likeUserIds: [],
+    createdAt: new Date().toISOString()
+  };
+  data.comments.push(comment);
+  list.heat += 1;
+  writeStore(data);
+  return { ...comment, likeCount: 0 };
+}
+
+function likeComment(commentId, user) {
+  const data = readStore();
+  const comment = data.comments.find((item) => item.id === commentId);
+  if (!comment) return null;
+  if (!comment.likeUserIds.includes(user.id)) {
+    comment.likeUserIds.push(user.id);
+    const list = data.rankLists.find((item) => item.id === comment.listId);
+    if (list) list.heat += 1;
+  }
+  writeStore(data);
+  return { ...comment, likeCount: comment.likeUserIds.length };
+}
+
+function getAdminOverview() {
+  const data = readStore();
+  const listTitleById = new Map(data.rankLists.map((list) => [list.id, list.title]));
+  const lists = data.rankLists
+    .map((list) => ({
+      id: list.id,
+      title: list.title,
+      description: list.description,
+      heat: list.heat,
+      itemCount: list.items.length,
+      pendingSubmissionCount: data.submissions.filter(
+        (submission) => submission.listId === list.id && submission.status === 'pending'
+      ).length,
+      candidateCount: data.candidates.filter((candidate) => candidate.listId === list.id).length,
+      commentCount: data.comments.filter((comment) => comment.listId === list.id).length,
+      lastSettledAt: list.lastSettledAt,
+      nextSettlementAt: nextHourAfter(list.lastSettledAt).toISOString()
+    }))
+    .sort((left, right) => right.heat - left.heat);
+
+  const submissions = data.submissions
+    .map((submission) => ({
+      id: submission.id,
+      listId: submission.listId,
+      listTitle: listTitleById.get(submission.listId) || '已删除榜单',
+      username: submission.username,
+      status: submission.status,
+      placementCount: Array.isArray(submission.placements) ? submission.placements.length : 0,
+      deleteCount: Array.isArray(submission.deleteItemIds) ? submission.deleteItemIds.length : 0,
+      candidateCount: Array.isArray(submission.candidateIds) ? submission.candidateIds.length : 0,
+      supportCandidateCount: Array.isArray(submission.supportCandidateIds) ? submission.supportCandidateIds.length : 0,
+      createdAt: submission.createdAt,
+      settledAt: submission.settledAt || ''
+    }))
+    .sort((left, right) => new Date(right.createdAt).getTime() - new Date(left.createdAt).getTime());
+
+  const candidates = data.candidates
+    .map((candidate) => ({
+      id: candidate.id,
+      listId: candidate.listId,
+      listTitle: listTitleById.get(candidate.listId) || '已删除榜单',
+      name: candidate.name,
+      kind: candidate.kind,
+      imageUrl: candidate.imageUrl,
+      tierIndex: candidate.tierIndex,
+      status: candidate.status,
+      supportCount: Array.isArray(candidate.supportUserIds) ? candidate.supportUserIds.length : 0,
+      createdByName: candidate.createdByName,
+      createdAt: candidate.createdAt
+    }))
+    .sort((left, right) => new Date(right.createdAt).getTime() - new Date(left.createdAt).getTime());
+
+  const comments = data.comments
+    .map((comment) => ({
+      id: comment.id,
+      listId: comment.listId,
+      listTitle: listTitleById.get(comment.listId) || '已删除榜单',
+      username: comment.username,
+      content: comment.content,
+      likeCount: Array.isArray(comment.likeUserIds) ? comment.likeUserIds.length : 0,
+      createdAt: comment.createdAt
+    }))
+    .sort((left, right) => new Date(right.createdAt).getTime() - new Date(left.createdAt).getTime());
+
+  const users = data.users
+    .map((user) => ({
+      id: user.id,
+      username: user.username,
+      isAdmin: Boolean(user.isAdmin),
+      submissionCount: data.submissions.filter((submission) => submission.userId === user.id).length,
+      candidateCount: data.candidates.filter((candidate) => candidate.createdBy === user.id).length,
+      commentCount: data.comments.filter((comment) => comment.userId === user.id).length,
+      supportCount: data.candidates.filter(
+        (candidate) => Array.isArray(candidate.supportUserIds) && candidate.supportUserIds.includes(user.id)
+      ).length,
+      likeCount: data.comments.filter(
+        (comment) => Array.isArray(comment.likeUserIds) && comment.likeUserIds.includes(user.id)
+      ).length
+    }))
+    .sort((left, right) => {
+      if (left.isAdmin !== right.isAdmin) return left.isAdmin ? -1 : 1;
+      return left.username.localeCompare(right.username);
+    });
+
+  return {
+    totals: {
+      lists: data.rankLists.length,
+      items: data.rankLists.reduce((total, list) => total + list.items.length, 0),
+      submissions: data.submissions.length,
+      pendingSubmissions: data.submissions.filter((submission) => submission.status === 'pending').length,
+      candidates: data.candidates.length,
+      pendingCandidates: data.candidates.filter((candidate) => candidate.status === 'pending').length,
+      comments: data.comments.length,
+      users: data.users.length
+    },
+    lists,
+    submissions,
+    candidates,
+    comments,
+    users
+  };
+}
+
+function deleteList(id) {
+  const data = readStore();
+  const exists = data.rankLists.some((list) => list.id === id);
+  if (!exists) return false;
+  data.rankLists = data.rankLists.filter((list) => list.id !== id);
+  data.submissions = data.submissions.filter((submission) => submission.listId !== id);
+  data.candidates = data.candidates.filter((candidate) => candidate.listId !== id);
+  data.comments = data.comments.filter((comment) => comment.listId !== id);
+  writeStore(data);
+  return true;
+}
+
+function deleteSubmission(id) {
+  const data = readStore();
+  const submission = data.submissions.find((item) => item.id === id);
+  if (!submission) return false;
+  data.submissions = data.submissions.filter((item) => item.id !== id);
+  recomputeListHeat(data, submission.listId);
+  writeStore(data);
+  return true;
+}
+
+function deleteCandidate(id) {
+  const data = readStore();
+  const candidate = data.candidates.find((item) => item.id === id);
+  if (!candidate) return false;
+  data.candidates = data.candidates.filter((item) => item.id !== id);
+  data.submissions.forEach((submission) => {
+    submission.candidateIds = Array.isArray(submission.candidateIds)
+      ? submission.candidateIds.filter((candidateId) => candidateId !== id)
+      : [];
+    submission.supportCandidateIds = Array.isArray(submission.supportCandidateIds)
+      ? submission.supportCandidateIds.filter((candidateId) => candidateId !== id)
+      : [];
+  });
+  recomputeListHeat(data, candidate.listId);
+  writeStore(data);
+  return true;
+}
+
+function deleteComment(id) {
+  const data = readStore();
+  const comment = data.comments.find((item) => item.id === id);
+  if (!comment) return false;
+  data.comments = data.comments.filter((item) => item.id !== id);
+  recomputeListHeat(data, comment.listId);
+  writeStore(data);
+  return true;
+}
+
+function deleteUser(id, actorId) {
+  const data = readStore();
+  const user = data.users.find((item) => item.id === id);
+  if (!user) return { ok: false, reason: 'not_found' };
+  if (user.id === actorId) return { ok: false, reason: 'self' };
+  if (user.isAdmin && data.users.filter((item) => item.isAdmin).length <= 1) {
+    return { ok: false, reason: 'last_admin' };
+  }
+
+  const removedCandidateIds = new Set(
+    data.candidates.filter((candidate) => candidate.createdBy === id).map((candidate) => candidate.id)
+  );
+
+  data.users = data.users.filter((item) => item.id !== id);
+  data.submissions = data.submissions
+    .filter((submission) => submission.userId !== id)
+    .map((submission) => ({
+      ...submission,
+      candidateIds: Array.isArray(submission.candidateIds)
+        ? submission.candidateIds.filter((candidateId) => !removedCandidateIds.has(candidateId))
+        : [],
+      supportCandidateIds: Array.isArray(submission.supportCandidateIds)
+        ? submission.supportCandidateIds.filter((candidateId) => !removedCandidateIds.has(candidateId))
+        : []
+    }));
+  data.candidates = data.candidates
+    .filter((candidate) => candidate.createdBy !== id)
+    .map((candidate) => ({
+      ...candidate,
+      supportUserIds: Array.isArray(candidate.supportUserIds)
+        ? candidate.supportUserIds.filter((userId) => userId !== id)
+        : []
+    }));
+  data.comments = data.comments
+    .filter((comment) => comment.userId !== id)
+    .map((comment) => ({
+      ...comment,
+      likeUserIds: Array.isArray(comment.likeUserIds) ? comment.likeUserIds.filter((userId) => userId !== id) : []
+    }));
+
+  data.rankLists.forEach((list) => recomputeListHeat(data, list.id));
+  writeStore(data);
+  return { ok: true };
+}
+
+function setUserAdmin(id, isAdmin, actorId) {
+  const data = readStore();
+  const user = data.users.find((item) => item.id === id);
+  if (!user) return { ok: false, reason: 'not_found' };
+  if (user.id === actorId) return { ok: false, reason: 'self' };
+  if (user.isAdmin && !isAdmin && data.users.filter((item) => item.isAdmin).length <= 1) {
+    return { ok: false, reason: 'last_admin' };
+  }
+
+  user.isAdmin = Boolean(isAdmin);
+  writeStore(data);
+  return { ok: true, user: { id: user.id, username: user.username, isAdmin: user.isAdmin } };
 }
 
 function getListSummary(listId) {
@@ -373,12 +697,23 @@ function getListSummary(listId) {
       ...candidate,
       supportCount: candidate.supportUserIds.length
     }));
+  const comments = data.comments
+    .filter((comment) => comment.listId === listId)
+    .map((comment) => ({
+      ...comment,
+      likeCount: comment.likeUserIds.length
+    }))
+    .sort((left, right) => {
+      if (right.likeCount !== left.likeCount) return right.likeCount - left.likeCount;
+      return new Date(right.createdAt).getTime() - new Date(left.createdAt).getTime();
+    });
   return {
     listId,
-    nextSettlementAt: new Date(new Date(list.lastSettledAt).getTime() + SETTLE_INTERVAL_MS).toISOString(),
+    nextSettlementAt: nextHourAfter(list.lastSettledAt).toISOString(),
     pendingSubmissionCount: pendingSubmissions.length,
     itemIntent,
-    candidates
+    candidates,
+    comments
   };
 }
 
@@ -394,5 +729,14 @@ module.exports = {
   createSubmission,
   createCandidate,
   supportCandidate,
+  createComment,
+  likeComment,
+  getAdminOverview,
+  deleteList,
+  deleteSubmission,
+  deleteCandidate,
+  deleteComment,
+  deleteUser,
+  setUserAdmin,
   getListSummary
 };

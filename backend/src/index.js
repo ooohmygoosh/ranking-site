@@ -7,7 +7,7 @@ const { auth, adminOnly, SECRET } = require('./middleware');
 
 const app = express();
 app.use(cors({ origin: true }));
-app.use(express.json({ limit: '1mb' }));
+app.use(express.json({ limit: '8mb' }));
 
 app.get('/api/ping', (req, res) => {
   res.json({ message: 'ranking site backend alive' });
@@ -45,6 +45,50 @@ app.get('/api/auth/me', auth, (req, res) => {
   res.json(req.user);
 });
 
+app.get('/api/admin/overview', auth, adminOnly, (req, res) => {
+  res.json(store.getAdminOverview());
+});
+
+app.delete('/api/admin/lists/:id', auth, adminOnly, (req, res) => {
+  const ok = store.deleteList(req.params.id);
+  if (!ok) return res.status(404).json({ error: '榜单未找到' });
+  res.json({ ok: true });
+});
+
+app.delete('/api/admin/submissions/:id', auth, adminOnly, (req, res) => {
+  const ok = store.deleteSubmission(req.params.id);
+  if (!ok) return res.status(404).json({ error: '意愿未找到' });
+  res.json({ ok: true });
+});
+
+app.delete('/api/admin/candidates/:id', auth, adminOnly, (req, res) => {
+  const ok = store.deleteCandidate(req.params.id);
+  if (!ok) return res.status(404).json({ error: '候选未找到' });
+  res.json({ ok: true });
+});
+
+app.delete('/api/admin/comments/:id', auth, adminOnly, (req, res) => {
+  const ok = store.deleteComment(req.params.id);
+  if (!ok) return res.status(404).json({ error: '评论未找到' });
+  res.json({ ok: true });
+});
+
+app.delete('/api/admin/users/:id', auth, adminOnly, (req, res) => {
+  const result = store.deleteUser(req.params.id, req.user.id);
+  if (result.ok) return res.json({ ok: true });
+  if (result.reason === 'self') return res.status(400).json({ error: '不能删除当前登录账户' });
+  if (result.reason === 'last_admin') return res.status(400).json({ error: '不能删除最后一个管理员账户' });
+  return res.status(404).json({ error: '账户未找到' });
+});
+
+app.patch('/api/admin/users/:id/role', auth, adminOnly, (req, res) => {
+  const result = store.setUserAdmin(req.params.id, Boolean(req.body.isAdmin), req.user.id);
+  if (result.ok) return res.json(result.user);
+  if (result.reason === 'self') return res.status(400).json({ error: '不能修改当前登录账户权限' });
+  if (result.reason === 'last_admin') return res.status(400).json({ error: '不能降级最后一个管理员账户' });
+  return res.status(404).json({ error: '账户未找到' });
+});
+
 app.get('/api/lists', (req, res) => {
   res.json(store.getAllLists());
 });
@@ -55,7 +99,7 @@ app.get('/api/lists/:id', (req, res) => {
   res.json(list);
 });
 
-app.post('/api/lists', auth, adminOnly, (req, res) => {
+app.post('/api/lists', auth, (req, res) => {
   const { title, description, coverImageUrl, items } = req.body;
   if (!title) return res.status(400).json({ error: '标题必填' });
   const list = store.createList({ title, description, coverImageUrl, items });
@@ -80,14 +124,24 @@ app.post('/api/lists/:id/submissions', auth, (req, res) => {
   res.json(submission);
 });
 
+app.post('/api/lists/:id/comments', auth, (req, res) => {
+  const { content } = req.body;
+  if (!String(content || '').trim()) return res.status(400).json({ error: '评论不能为空' });
+  const comment = store.createComment(req.params.id, content, req.user);
+  if (!comment) return res.status(404).json({ error: '榜单未找到' });
+  res.json(comment);
+});
+
+app.post('/api/comments/:id/like', auth, (req, res) => {
+  const comment = store.likeComment(req.params.id, req.user);
+  if (!comment) return res.status(404).json({ error: '评论未找到' });
+  res.json(comment);
+});
+
 app.post('/api/lists/:id/candidates', auth, (req, res) => {
   const { name, imageUrl, tierIndex } = req.body;
-  if (!Number.isFinite(Number(tierIndex))) {
-    return res.status(400).json({ error: '目标档位必填' });
-  }
-  if (!String(name || imageUrl || '').trim()) {
-    return res.status(400).json({ error: '候选内容不能为空' });
-  }
+  if (!Number.isFinite(Number(tierIndex))) return res.status(400).json({ error: '目标档位必填' });
+  if (!String(name || imageUrl || '').trim()) return res.status(400).json({ error: '候选内容不能为空' });
   const candidate = store.createCandidate(req.params.id, { name, imageUrl, tierIndex }, req.user);
   if (!candidate) return res.status(404).json({ error: '榜单未找到' });
   res.json(candidate);
