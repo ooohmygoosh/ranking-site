@@ -7,38 +7,6 @@ const filePath = path.join(__dirname, '../data/store.json');
 const uploadDir = path.join(__dirname, '../data/uploads');
 let storeCache = null;
 const DEFAULT_TIERS = ['夯', '顶级', '人上人', 'NPC', '拉完了'];
-const STRESS_MEMES = [
-  { name: '黑神话：悟空', tierIndex: 0, supportCount: 36 },
-  { name: '遥遥领先', tierIndex: 0, supportCount: 34 },
-  { name: '含金量还在上升', tierIndex: 0, supportCount: 31 },
-  { name: '偏偏你最争气', tierIndex: 0, supportCount: 28 },
-  { name: '小孩哥 / 小孩姐', tierIndex: 0, supportCount: 25 },
-  { name: 'City不City', tierIndex: 1, supportCount: 24 },
-  { name: '松弛感', tierIndex: 1, supportCount: 22 },
-  { name: '硬控', tierIndex: 1, supportCount: 20 },
-  { name: '主理人', tierIndex: 1, supportCount: 18 },
-  { name: '公主 / 王子，请上车', tierIndex: 1, supportCount: 16 },
-  { name: 'i人 / e人', tierIndex: 2, supportCount: 15 },
-  { name: '显眼包', tierIndex: 2, supportCount: 14 },
-  { name: '多巴胺穿搭', tierIndex: 2, supportCount: 13 },
-  { name: '浓人淡人', tierIndex: 2, supportCount: 12 },
-  { name: '电子榨菜', tierIndex: 2, supportCount: 11 },
-  { name: '班味儿', tierIndex: 3, supportCount: 10 },
-  { name: '特种兵旅游', tierIndex: 3, supportCount: 9 },
-  { name: '水灵灵地', tierIndex: 3, supportCount: 8 },
-  { name: '脆皮大学生', tierIndex: 3, supportCount: 7 },
-  { name: '退一万步讲', tierIndex: 3, supportCount: 6 },
-  { name: '孔乙己文学', tierIndex: 4, supportCount: 5 },
-  { name: 'X门', tierIndex: 4, supportCount: 5 },
-  { name: '挖呀挖呀挖', tierIndex: 4, supportCount: 4 },
-  { name: '尊嘟假嘟', tierIndex: 4, supportCount: 4 },
-  { name: '鼠鼠我鸭', tierIndex: 4, supportCount: 3 },
-  { name: '不是哥们', tierIndex: 4, supportCount: 3 },
-  { name: '包的', tierIndex: 3, supportCount: 6 },
-  { name: '这河狸吗', tierIndex: 3, supportCount: 6 },
-  { name: '哈基米', tierIndex: 2, supportCount: 9 },
-  { name: '草台班子', tierIndex: 4, supportCount: 4 }
-];
 
 function isImageValue(value) {
   return /^(https?:\/\/.+\.(png|jpe?g|gif|webp|avif|svg)(\?.*)?|data:image\/[^;]+;base64,.+)$/i.test(
@@ -437,47 +405,6 @@ function settleListNow(id) {
   settleList(data, id);
   writeStore(data);
   return getListById(id);
-}
-
-function seedMemeStressData(listId, user) {
-  const data = readStore();
-  const list = data.rankLists.find((item) => item.id === listId);
-  if (!list) return null;
-
-  const existingNames = new Set(
-    data.candidates.filter((candidate) => candidate.listId === listId).map((candidate) => candidate.name)
-  );
-  const now = Date.now();
-  const added = [];
-
-  STRESS_MEMES.forEach((entry, index) => {
-    if (existingNames.has(entry.name)) return;
-    const candidateId = uuid();
-    const supportCount = Math.max(1, entry.supportCount || 1);
-    const supportUserIds = [
-      user.id,
-      ...Array.from({ length: supportCount - 1 }, (_, supportIndex) => `stress-${candidateId}-${supportIndex}`)
-    ];
-    const candidate = {
-      id: candidateId,
-      listId,
-      tierIndex: Math.max(0, Math.min(list.tiers.length - 1, entry.tierIndex)),
-      name: entry.name,
-      kind: 'text',
-      imageUrl: '',
-      createdBy: user.id,
-      createdByName: user.username,
-      supportUserIds,
-      status: 'pending',
-      createdAt: new Date(now - index * 60000).toISOString()
-    };
-    data.candidates.push(candidate);
-    added.push({ ...candidate, supportCount });
-  });
-
-  recomputeListHeat(data, listId);
-  writeStore(data);
-  return { addedCount: added.length, skippedCount: STRESS_MEMES.length - added.length, candidates: added };
 }
 
 function normalizeCandidatePayload(list, candidate, user) {
@@ -881,7 +808,6 @@ module.exports = {
   createList,
   updateList,
   settleListNow,
-  seedMemeStressData,
   createSubmission,
   createCandidate,
   supportCandidate,
