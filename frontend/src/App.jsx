@@ -17,7 +17,9 @@ import {
   deleteAdminCandidateApi,
   deleteAdminCommentApi,
   deleteAdminUserApi,
-  updateAdminUserRoleApi
+  updateAdminUserRoleApi,
+  settleAdminListApi,
+  seedAdminListMemesApi
 } from './services/api';
 
 function fileToDataUrl(file) {
@@ -325,6 +327,30 @@ function App() {
     }
   };
 
+  const handleAdminSettleList = async (listId) => {
+    try {
+      await settleAdminListApi(listId);
+      setMessage('已按当前热度立即推送');
+      await loadAdmin();
+      await loadHome();
+      if (activeList?.id === listId) await loadDetail(listId);
+    } catch (err) {
+      setMessage(err.message || '立即推送失败');
+    }
+  };
+
+  const handleAdminSeedMemes = async (listId) => {
+    try {
+      const result = await seedAdminListMemesApi(listId);
+      setMessage(`已导入 ${result.addedCount || 0} 个梗候选`);
+      await loadAdmin();
+      await loadHome();
+      if (activeList?.id === listId) await loadDetail(listId);
+    } catch (err) {
+      setMessage(err.message || '导入压力数据失败');
+    }
+  };
+
   const handleCoverFile = async (file) => {
     if (!file || !file.type.startsWith('image/')) return;
     setCoverCropZoom(1);
@@ -426,6 +452,8 @@ function App() {
           onRefresh={loadAdmin}
           onDelete={handleAdminDelete}
           onToggleUserRole={handleAdminRoleChange}
+          onSettleList={handleAdminSettleList}
+          onSeedMemes={handleAdminSeedMemes}
         />
       ) : detailLoading && !activeList ? (
         <main className="detail-page">
@@ -727,7 +755,7 @@ function QuickStart({ account, setAccount, onStart, onLogin, message }) {
   );
 }
 
-function AdminPanel({ data, onRefresh, onDelete, onToggleUserRole }) {
+function AdminPanel({ data, onRefresh, onDelete, onToggleUserRole, onSettleList, onSeedMemes }) {
   const [tab, setTab] = useState('lists');
 
   if (!data) {
@@ -783,7 +811,14 @@ function AdminPanel({ data, onRefresh, onDelete, onToggleUserRole }) {
         ))}
       </nav>
 
-      {tab === 'lists' ? <ListTable rows={data.lists} onDelete={(id) => onDelete('list', id)} /> : null}
+      {tab === 'lists' ? (
+        <ListTable
+          rows={data.lists}
+          onDelete={(id) => onDelete('list', id)}
+          onSettle={onSettleList}
+          onSeedMemes={onSeedMemes}
+        />
+      ) : null}
       {tab === 'submissions' ? (
         <SubmissionTable rows={data.submissions} onDelete={(id) => onDelete('submission', id)} />
       ) : null}
@@ -805,7 +840,7 @@ function Stat({ label, value }) {
   );
 }
 
-function ListTable({ rows, onDelete }) {
+function ListTable({ rows, onDelete, onSettle, onSeedMemes }) {
   return (
     <section className="admin-table">
       <div className="admin-table-head list-cols">
@@ -826,9 +861,17 @@ function ListTable({ rows, onDelete }) {
             {row.itemCount} 项 · {row.pendingSubmissionCount} 意愿 · {row.candidateCount} 候选 · {row.commentCount} 评论
           </span>
           <span>{formatDate(row.nextSettlementAt)}</span>
-          <button className="btn danger" type="button" onClick={() => onDelete(row.id)}>
-            删除
-          </button>
+          <div className="admin-actions">
+            <button className="btn secondary" type="button" onClick={() => onSeedMemes(row.id)}>
+              导入梗
+            </button>
+            <button className="btn primary" type="button" onClick={() => onSettle(row.id)}>
+              立即推送
+            </button>
+            <button className="btn danger" type="button" onClick={() => onDelete(row.id)}>
+              删除
+            </button>
+          </div>
         </div>
       ))}
     </section>
@@ -867,6 +910,7 @@ function SubmissionTable({ rows, onDelete }) {
 }
 
 function CandidateTable({ rows, onDelete }) {
+  const maxSupport = Math.max(1, ...rows.map((row) => row.supportCount || 0));
   return (
     <section className="admin-table">
       <div className="admin-table-head candidate-cols">
@@ -886,7 +930,12 @@ function CandidateTable({ rows, onDelete }) {
             </div>
           </div>
           <span>{row.listTitle}</span>
-          <span>{row.supportCount}</span>
+          <div className="admin-heat-cell">
+            <strong>{row.supportCount}</strong>
+            <div className="heat-bar" aria-label={`${row.name} ${Math.round(((row.supportCount || 0) / maxSupport) * 100)}%`}>
+              <span style={{ width: `${Math.round(((row.supportCount || 0) / maxSupport) * 100)}%` }} />
+            </div>
+          </div>
           <span>{row.status === 'pending' ? '待加入' : '已处理'}</span>
           <button className="btn danger" type="button" onClick={() => onDelete(row.id)}>
             删除

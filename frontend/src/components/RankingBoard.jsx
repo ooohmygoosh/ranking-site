@@ -448,6 +448,13 @@ export default function RankingBoard({
   };
 
   const itemIntent = selectedItem ? summary?.itemIntent?.[selectedItem.id] : null;
+  const itemIntentTotal = itemIntent
+    ? tiers.reduce((total, _, index) => total + (itemIntent.targetCounts?.[index] || 0), itemIntent.deleteCount || 0)
+    : 0;
+  const maxCandidateSupport = Math.max(
+    1,
+    ...selectedTierCandidates.map((candidate) => candidate.supportCount || 0)
+  );
 
   return (
     <div className="ranking-page">
@@ -634,15 +641,40 @@ export default function RankingBoard({
           </div>
           <OptionImage item={selectedItem} />
           <div className="intent-list">
-            {tiers.map((tier, index) => (
-              <div key={tier} className="intent-row">
-                <span>{tier}</span>
-                <strong>{itemIntent?.targetCounts?.[index] || 0}</strong>
-              </div>
-            ))}
+            {tiers.map((tier, index) => {
+              const count = itemIntent?.targetCounts?.[index] || 0;
+              const percent = itemIntentTotal > 0 ? Math.round((count / itemIntentTotal) * 100) : 0;
+              return (
+                <div key={tier} className="intent-row">
+                  <span>{tier}</span>
+                  <div className="heat-metric">
+                    <strong>{count}</strong>
+                    <div className="heat-bar" aria-label={`${tier} ${percent}%`}>
+                      <span style={{ width: `${percent}%` }} />
+                    </div>
+                  </div>
+                </div>
+              );
+            })}
             <div className="intent-row danger">
               <span>希望删除</span>
-              <strong>{itemIntent?.deleteCount || 0}</strong>
+              <div className="heat-metric">
+                <strong>{itemIntent?.deleteCount || 0}</strong>
+                <div
+                  className="heat-bar"
+                  aria-label={`删除 ${
+                    itemIntentTotal > 0 ? Math.round(((itemIntent?.deleteCount || 0) / itemIntentTotal) * 100) : 0
+                  }%`}
+                >
+                  <span
+                    style={{
+                      width: `${
+                        itemIntentTotal > 0 ? Math.round(((itemIntent?.deleteCount || 0) / itemIntentTotal) * 100) : 0
+                      }%`
+                    }}
+                  />
+                </div>
+              </div>
             </div>
           </div>
         </aside>
@@ -662,6 +694,7 @@ export default function RankingBoard({
             ) : (
               selectedTierCandidates.map((candidate) => {
                 const isSupported = supportedCandidateIds.includes(candidate.id);
+                const percent = Math.round(((candidate.supportCount || 0) / maxCandidateSupport) * 100);
                 return (
                   <button
                     key={candidate.id}
@@ -674,7 +707,12 @@ export default function RankingBoard({
                   >
                     <OptionImage item={candidate} />
                     <span>{candidate.name}</span>
-                    <strong>{candidate.local ? '待提交' : isSupported ? '已暂存' : `热度 ${candidate.supportCount}`}</strong>
+                    <div className="candidate-heat">
+                      <strong>{candidate.local ? '待提交' : isSupported ? '已暂存' : `热度 ${candidate.supportCount}`}</strong>
+                      <div className="heat-bar" aria-label={`${candidate.name} ${percent}%`}>
+                        <span style={{ width: `${percent}%` }} />
+                      </div>
+                    </div>
                   </button>
                 );
               })

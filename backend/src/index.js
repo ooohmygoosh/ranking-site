@@ -93,6 +93,18 @@ app.patch('/api/admin/users/:id/role', auth, adminOnly, (req, res) => {
   return res.status(404).json({ error: '账户未找到' });
 });
 
+app.post('/api/admin/lists/:id/settle', auth, adminOnly, (req, res) => {
+  const list = store.settleListNow(req.params.id);
+  if (!list) return res.status(404).json({ error: '榜单未找到' });
+  res.json({ ok: true, list });
+});
+
+app.post('/api/admin/lists/:id/stress-memes', auth, adminOnly, (req, res) => {
+  const result = store.seedMemeStressData(req.params.id, req.user);
+  if (!result) return res.status(404).json({ error: '榜单未找到' });
+  res.json({ ok: true, ...result });
+});
+
 app.get('/api/lists', (req, res) => {
   res.json(store.getAllLists());
 });
