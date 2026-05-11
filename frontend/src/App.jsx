@@ -29,6 +29,23 @@ function fileToDataUrl(file) {
   });
 }
 
+async function imageFileToOptimizedDataUrl(file, maxSize = 900, quality = 0.82) {
+  const dataUrl = await fileToDataUrl(file);
+  return new Promise((resolve) => {
+    const image = new Image();
+    image.onload = () => {
+      const ratio = Math.min(1, maxSize / Math.max(image.width, image.height));
+      const canvas = document.createElement('canvas');
+      canvas.width = Math.max(1, Math.round(image.width * ratio));
+      canvas.height = Math.max(1, Math.round(image.height * ratio));
+      canvas.getContext('2d').drawImage(image, 0, 0, canvas.width, canvas.height);
+      resolve(canvas.toDataURL('image/jpeg', quality));
+    };
+    image.onerror = () => resolve(dataUrl);
+    image.src = dataUrl;
+  });
+}
+
 function makeAccount() {
   const suffix = Math.random().toString(36).slice(2, 8);
   return {
@@ -67,22 +84,39 @@ function App() {
   const [adminData, setAdminData] = useState(null);
   const [query, setQuery] = useState('');
   const [message, setMessage] = useState('');
+  const [bootLoading, setBootLoading] = useState(Boolean(token));
+  const [homeLoading, setHomeLoading] = useState(false);
+  const [detailLoading, setDetailLoading] = useState(false);
   const [creating, setCreating] = useState(false);
+  const [isCreatingList, setIsCreatingList] = useState(false);
   const [newTitle, setNewTitle] = useState('');
   const [newDescription, setNewDescription] = useState('');
   const [newCoverImageUrl, setNewCoverImageUrl] = useState('');
   const [generatedAccount, setGeneratedAccount] = useState(savedAccount || makeAccount());
+  const creatingListRef = useRef(false);
   const coverInputRef = useRef(null);
 
   async function loadHome() {
-    setLists(await getListsApi());
+    setHomeLoading(true);
+    try {
+      const data = await getListsApi();
+      setLists(data);
+      return data;
+    } finally {
+      setHomeLoading(false);
+    }
   }
 
   async function loadDetail(listId) {
-    const [listData, summaryData] = await Promise.all([getListApi(listId), getListSummaryApi(listId)]);
-    setActiveList(listData);
-    setSummary(summaryData);
-    setComments(summaryData.comments || []);
+    setDetailLoading(true);
+    try {
+      const [listData, summaryData] = await Promise.all([getListApi(listId), getListSummaryApi(listId)]);
+      setActiveList(listData);
+      setSummary(summaryData);
+      setComments(summaryData.comments || []);
+    } finally {
+      setDetailLoading(false);
+    }
   }
 
   async function loadAdmin() {
@@ -90,23 +124,46 @@ function App() {
   }
 
   useEffect(() => {
+    let cancelled = false;
+
     async function boot() {
       if (!token) {
         localStorage.removeItem('authToken');
         setUser(null);
+        setBootLoading(false);
+        setHomeLoading(false);
         return;
       }
+      setBootLoading(true);
+      setHomeLoading(true);
       try {
         localStorage.setItem('authToken', token);
-        setUser(await getUserApi());
-        await loadHome();
+        const homeRequest = getListsApi().catch((err) => ({ error: err }));
+        const userData = await getUserApi();
+        if (cancelled) return;
+        setUser(userData);
+        const homeResult = await homeRequest;
+        if (cancelled) return;
+        if (homeResult.error) {
+          setMessage(homeResult.error.message || '榜单加载失败');
+        } else {
+          setLists(homeResult);
+        }
       } catch (err) {
         localStorage.removeItem('authToken');
         setToken('');
         setMessage(err.message || '加载失败');
+      } finally {
+        if (!cancelled) {
+          setBootLoading(false);
+          setHomeLoading(false);
+        }
       }
     }
     boot();
+    return () => {
+      cancelled = true;
+    };
   }, [token]);
 
   useEffect(() => {
@@ -122,12 +179,12 @@ function App() {
 
   const filteredLists = useMemo(() => {
     const keyword = query.trim().toLowerCase();
-    return lists
+    return [...lists]
       .filter((list) => {
         if (!keyword) return true;
         return `${list.title} ${list.description || ''}`.toLowerCase().includes(keyword);
       })
-      .sort((left, right) => right.heat - left.heat);
+      .sort((left, right) => (Number(right.heat) || 0) - (Number(left.heat) || 0));
   }, [lists, query]);
 
   const handleLogin = async (username, password) => {
@@ -167,6 +224,9 @@ function App() {
   const handleOpenList = async (listId) => {
     try {
       setAdminMode(false);
+      setActiveList(null);
+      setSummary(null);
+      setComments([]);
       await loadDetail(listId);
     } catch (err) {
       setMessage(err.message || '打开榜单失败');
@@ -237,12 +297,14 @@ function App() {
 
   const handleCoverFile = async (file) => {
     if (!file || !file.type.startsWith('image/')) return;
-    setNewCoverImageUrl(await fileToDataUrl(file));
+    setNewCoverImageUrl(await imageFileToOptimizedDataUrl(file, 520, 0.8));
   };
 
   const handleCreateList = async (event) => {
     event.preventDefault();
-    if (!newTitle.trim()) return;
+    if (!newTitle.trim() || creatingListRef.current) return;
+    creatingListRef.current = true;
+    setIsCreatingList(true);
     try {
       const list = await createListApi({
         title: newTitle.trim(),
@@ -256,10 +318,18 @@ function App() {
       setNewCoverImageUrl('');
       await loadHome();
       await loadDetail(list.id);
+      creatingListRef.current = false;
+      setIsCreatingList(false);
     } catch (err) {
+      creatingListRef.current = false;
+      setIsCreatingList(false);
       setMessage(err.message || '创建失败');
     }
   };
+
+  if (bootLoading && token && !user) {
+    return <LoadingScreen />;
+  }
 
   if (!token || !user) {
     return (
@@ -319,6 +389,10 @@ function App() {
           onDelete={handleAdminDelete}
           onToggleUserRole={handleAdminRoleChange}
         />
+      ) : detailLoading && !activeList ? (
+        <main className="detail-page">
+          <DetailSkeleton />
+        </main>
       ) : !activeList ? (
         <main className="home-page">
           <section className="home-intro">
@@ -337,10 +411,15 @@ function App() {
               </div>
             </button>
 
-            {filteredLists.map((list) => (
+            {homeLoading && lists.length === 0 ? <HomeSkeleton /> : null}
+            {!homeLoading || lists.length > 0 ? filteredLists.map((list) => (
               <button key={list.id} className="list-card" type="button" onClick={() => handleOpenList(list.id)}>
                 <div className="list-cover">
-                  {list.coverImageUrl ? <img src={list.coverImageUrl} alt={list.title} /> : <span>{list.title}</span>}
+                  {list.coverImageUrl ? (
+                    <img src={list.coverImageUrl} alt={list.title} loading="lazy" decoding="async" />
+                  ) : (
+                    <span>{list.title}</span>
+                  )}
                 </div>
                 <div className="list-card-body">
                   <h2>{list.title}</h2>
@@ -350,7 +429,7 @@ function App() {
                   </div>
                 </div>
               </button>
-            ))}
+            )) : null}
           </section>
         </main>
       ) : (
@@ -414,7 +493,7 @@ function App() {
                 onChange={(event) => handleCoverFile(event.target.files?.[0])}
               />
             </div>
-            <button className="btn primary" type="submit">
+            <button className="btn primary" type="submit" disabled={isCreatingList || !newTitle.trim()}>
               创建并进入
             </button>
           </form>
@@ -423,6 +502,70 @@ function App() {
 
       {message ? <div className="page-message">{message}</div> : null}
     </div>
+  );
+}
+
+function LoadingMark({ label = '加载中' }) {
+  return (
+    <div className="loading-mark" role="status" aria-live="polite">
+      <span className="loading-logo">夯</span>
+      <span className="loading-ring" />
+      <strong>{label}</strong>
+    </div>
+  );
+}
+
+function LoadingScreen() {
+  return (
+    <div className="loading-screen">
+      <LoadingMark label="正在进入榜单" />
+      <div className="loading-skeleton-grid" aria-hidden="true">
+        <span />
+        <span />
+        <span />
+      </div>
+    </div>
+  );
+}
+
+function SkeletonCard() {
+  return (
+    <div className="list-card skeleton-card" aria-hidden="true">
+      <div className="list-cover skeleton-block" />
+      <div className="list-card-body">
+        <span className="skeleton-line strong" />
+        <span className="skeleton-line" />
+        <span className="skeleton-line short" />
+      </div>
+    </div>
+  );
+}
+
+function HomeSkeleton() {
+  return (
+    <>
+      <SkeletonCard />
+      <SkeletonCard />
+      <SkeletonCard />
+    </>
+  );
+}
+
+function DetailSkeleton() {
+  return (
+    <section className="detail-skeleton" aria-live="polite">
+      <LoadingMark label="正在读取榜单" />
+      {[0, 1, 2, 3, 4].map((index) => (
+        <div className="tier-row skeleton-tier" key={index}>
+          <div className="tier-label skeleton-label" />
+          <div className="tier-options">
+            <span className="option-tile skeleton-tile" />
+            <span className="option-tile skeleton-tile" />
+            <span className="option-tile skeleton-tile" />
+          </div>
+        </div>
+      ))}
+    </section>
   );
 }
 

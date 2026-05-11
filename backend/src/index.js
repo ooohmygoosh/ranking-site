@@ -1,11 +1,13 @@
 const express = require('express');
 const cors = require('cors');
+const compression = require('compression');
 const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
 const store = require('./store');
 const { auth, adminOnly, SECRET } = require('./middleware');
 
 const app = express();
+app.use(compression());
 app.use(cors({ origin: true }));
 app.use(express.json({ limit: '8mb' }));
 

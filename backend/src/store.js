@@ -4,6 +4,7 @@ const bcrypt = require('bcryptjs');
 const { v4: uuid } = require('uuid');
 
 const filePath = path.join(__dirname, '../data/store.json');
+let storeCache = null;
 const DEFAULT_TIERS = ['夯', '顶级', '人上人', 'NPC', '拉完了'];
 
 function isImageValue(value) {
@@ -54,6 +55,12 @@ function normalizeList(list) {
   };
 }
 
+function getSummaryCoverImageUrl(list) {
+  const value = list.coverImageUrl || '';
+  if (value.startsWith('data:image/') && value.length > 350000) return '';
+  return value;
+}
+
 function defaultData() {
   return {
     users: [
@@ -95,6 +102,7 @@ function ensureStore() {
 }
 
 function writeStore(data) {
+  storeCache = data;
   fs.writeFileSync(filePath, JSON.stringify(data, null, 2), 'utf8');
 }
 
@@ -159,9 +167,11 @@ function migrateData(data) {
 
 function readRawStore() {
   ensureStore();
+  if (storeCache) return storeCache;
   const parsed = JSON.parse(fs.readFileSync(filePath, 'utf8'));
   const { data, changed } = migrateData(parsed);
   if (changed) writeStore(data);
+  storeCache = data;
   return data;
 }
 
@@ -288,16 +298,34 @@ function createUser(username, password, isAdmin = false) {
 
 function getAllLists() {
   const data = readStore();
+  const pendingCandidateCounts = new Map();
+  data.candidates.forEach((candidate) => {
+    if (candidate.status !== 'pending') return;
+    pendingCandidateCounts.set(candidate.listId, (pendingCandidateCounts.get(candidate.listId) || 0) + 1);
+  });
+
+  const commentCounts = new Map();
+  data.comments.forEach((comment) => {
+    commentCounts.set(comment.listId, (commentCounts.get(comment.listId) || 0) + 1);
+  });
+
   return data.rankLists
     .map((list) => ({
-      ...list,
+      id: list.id,
+      title: list.title,
+      description: list.description,
+      coverImageUrl: getSummaryCoverImageUrl(list),
+      hasCoverImage: Boolean(list.coverImageUrl),
+      type: list.type,
+      tiers: list.tiers,
+      heat: Number(list.heat) || 0,
+      lastSettledAt: list.lastSettledAt,
+      nextSettlementAt: nextHourAfter(list.lastSettledAt).toISOString(),
       itemCount: list.items.length,
-      pendingCandidateCount: data.candidates.filter(
-        (candidate) => candidate.listId === list.id && candidate.status === 'pending'
-      ).length,
-      commentCount: data.comments.filter((comment) => comment.listId === list.id).length
+      pendingCandidateCount: pendingCandidateCounts.get(list.id) || 0,
+      commentCount: commentCounts.get(list.id) || 0
     }))
-    .sort((left, right) => right.heat - left.heat);
+    .sort((left, right) => (Number(right.heat) || 0) - (Number(left.heat) || 0));
 }
 
 function getListById(id) {
@@ -694,14 +722,26 @@ function getListSummary(listId) {
   const candidates = data.candidates
     .filter((candidate) => candidate.listId === listId && candidate.status === 'pending')
     .map((candidate) => ({
-      ...candidate,
-      supportCount: candidate.supportUserIds.length
+      id: candidate.id,
+      listId: candidate.listId,
+      name: candidate.name,
+      kind: candidate.kind,
+      imageUrl: candidate.imageUrl,
+      tierIndex: candidate.tierIndex,
+      status: candidate.status,
+      createdByName: candidate.createdByName,
+      createdAt: candidate.createdAt,
+      supportCount: Array.isArray(candidate.supportUserIds) ? candidate.supportUserIds.length : 0
     }));
   const comments = data.comments
     .filter((comment) => comment.listId === listId)
     .map((comment) => ({
-      ...comment,
-      likeCount: comment.likeUserIds.length
+      id: comment.id,
+      listId: comment.listId,
+      username: comment.username,
+      content: comment.content,
+      createdAt: comment.createdAt,
+      likeCount: Array.isArray(comment.likeUserIds) ? comment.likeUserIds.length : 0
     }))
     .sort((left, right) => {
       if (right.likeCount !== left.likeCount) return right.likeCount - left.likeCount;

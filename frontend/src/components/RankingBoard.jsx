@@ -44,10 +44,10 @@ function cropSquare(dataUrl, zoom = 1, offset = { x: 0, y: 0 }) {
       const sx = Math.max(0, Math.min(image.width - size, (image.width - size) / 2 - offset.x * maxX));
       const sy = Math.max(0, Math.min(image.height - size, (image.height - size) / 2 - offset.y * maxY));
       const canvas = document.createElement('canvas');
-      canvas.width = 512;
-      canvas.height = 512;
-      canvas.getContext('2d').drawImage(image, sx, sy, size, size, 0, 0, 512, 512);
-      resolve(canvas.toDataURL('image/jpeg', 0.86));
+      canvas.width = 384;
+      canvas.height = 384;
+      canvas.getContext('2d').drawImage(image, sx, sy, size, size, 0, 0, 384, 384);
+      resolve(canvas.toDataURL('image/jpeg', 0.82));
     };
     image.onerror = reject;
     image.src = dataUrl;
@@ -58,7 +58,11 @@ function OptionImage({ item }) {
   const isImage = item.kind === 'image' && item.imageUrl;
   return (
     <div className="option-image">
-      {isImage ? <img src={item.imageUrl} alt={item.name} /> : <div className="text-card">{item.name}</div>}
+      {isImage ? (
+        <img src={item.imageUrl} alt={item.name} loading="lazy" decoding="async" />
+      ) : (
+        <div className="text-card">{item.name}</div>
+      )}
     </div>
   );
 }
@@ -128,6 +132,7 @@ export default function RankingBoard({
   const [draftCandidates, setDraftCandidates] = useState([]);
   const [supportedCandidateIds, setSupportedCandidateIds] = useState([]);
   const [dragItem, setDragItem] = useState(null);
+  const [pointerDrag, setPointerDrag] = useState(null);
   const [dragOverTier, setDragOverTier] = useState(null);
   const [selectedItem, setSelectedItem] = useState(null);
   const [selectedTier, setSelectedTier] = useState(null);
@@ -139,6 +144,7 @@ export default function RankingBoard({
   const [cropDrag, setCropDrag] = useState(null);
   const boardRef = useRef(null);
   const fileInputRef = useRef(null);
+  const suppressClickRef = useRef(false);
 
   useEffect(() => {
     setDraftItems((list.items || []).map((item, index) => ({ ...item, localOrder: item.order ?? index })));
@@ -146,11 +152,18 @@ export default function RankingBoard({
     setDraftCandidates([]);
     setSupportedCandidateIds([]);
     setDragItem(null);
+    setPointerDrag(null);
     setSelectedItem(null);
     setSelectedTier(null);
     setCropDraft(null);
     setCommentValue('');
   }, [list.id, list.items]);
+
+  useEffect(() => {
+    if (!pointerDrag?.active) return undefined;
+    document.body.classList.add('is-ranking-dragging');
+    return () => document.body.classList.remove('is-ranking-dragging');
+  }, [pointerDrag?.active]);
 
   const previewItems = useMemo(() => {
     const supported = (summary?.candidates || [])
@@ -279,6 +292,94 @@ export default function RankingBoard({
     setDragOverTier(null);
   };
 
+  const getDropTargets = (clientX, clientY) => {
+    const elements =
+      typeof document.elementsFromPoint === 'function'
+        ? document.elementsFromPoint(clientX, clientY)
+        : [document.elementFromPoint(clientX, clientY)].filter(Boolean);
+    const closest = (selector) => elements.map((element) => element.closest?.(selector)).find(Boolean);
+    return {
+      deleteZone: closest('.delete-zone'),
+      options: closest('.tier-options'),
+      row: closest('.tier-row')
+    };
+  };
+
+  const updateDragHover = (clientX, clientY) => {
+    const { options, row } = getDropTargets(clientX, clientY);
+    const targetRow = options?.closest('.tier-row') || row;
+    const tierIndex = targetRow ? Number(targetRow.dataset.tierIndex) : null;
+    setDragOverTier(Number.isFinite(tierIndex) ? tierIndex : null);
+  };
+
+  const startPointerDrag = (item) => (event) => {
+    if (item.preview || (event.button !== undefined && event.button !== 0)) return;
+    const rect = event.currentTarget.getBoundingClientRect();
+    event.currentTarget.setPointerCapture?.(event.pointerId);
+    setDragItem(item);
+    setPointerDrag({
+      itemId: item.id,
+      pointerId: event.pointerId,
+      startX: event.clientX,
+      startY: event.clientY,
+      x: event.clientX,
+      y: event.clientY,
+      offsetX: event.clientX - rect.left,
+      offsetY: event.clientY - rect.top,
+      width: rect.width,
+      height: rect.height,
+      active: false
+    });
+  };
+
+  const movePointerDrag = (itemId) => (event) => {
+    if (!pointerDrag || pointerDrag.itemId !== itemId || pointerDrag.pointerId !== event.pointerId) return;
+    const distance = Math.hypot(event.clientX - pointerDrag.startX, event.clientY - pointerDrag.startY);
+    const active = pointerDrag.active || distance > 6;
+    if (active) {
+      event.preventDefault();
+      updateDragHover(event.clientX, event.clientY);
+    }
+    setPointerDrag({ ...pointerDrag, x: event.clientX, y: event.clientY, active });
+  };
+
+  const finishPointerDrag = (itemId) => (event) => {
+    if (!pointerDrag || pointerDrag.itemId !== itemId || pointerDrag.pointerId !== event.pointerId) return;
+    if (event.currentTarget.hasPointerCapture?.(event.pointerId)) {
+      event.currentTarget.releasePointerCapture(event.pointerId);
+    }
+
+    if (pointerDrag.active) {
+      event.preventDefault();
+      suppressClickRef.current = true;
+      window.setTimeout(() => {
+        suppressClickRef.current = false;
+      }, 250);
+
+      const { deleteZone, options, row } = getDropTargets(event.clientX, event.clientY);
+      if (deleteZone) {
+        removeItem(itemId);
+      } else if (options) {
+        const targetRow = options.closest('.tier-row');
+        const tierIndex = targetRow ? Number(targetRow.dataset.tierIndex) : null;
+        if (Number.isFinite(tierIndex)) insertItemAtDropPoint(itemId, tierIndex, options, event.clientX, event.clientY);
+      } else if (row) {
+        const tierIndex = Number(row.dataset.tierIndex);
+        if (Number.isFinite(tierIndex)) moveItemToTierEnd(itemId, tierIndex);
+      }
+    }
+
+    setPointerDrag(null);
+    setDragItem(null);
+    setDragOverTier(null);
+  };
+
+  const cancelPointerDrag = () => {
+    setPointerDrag(null);
+    setDragItem(null);
+    setDragOverTier(null);
+  };
+
   const addDraftCandidate = (candidate) => {
     if (selectedTier === null) return;
     setDraftCandidates((items) => [
@@ -385,6 +486,7 @@ export default function RankingBoard({
           {tiers.map((tier, tierIndex) => (
             <section
               key={tier}
+              data-tier-index={tierIndex}
               className={`tier-row tier-${tierIndex}${dragOverTier === tierIndex ? ' is-drop-target' : ''}`}
               onDragOver={(event) => {
                 event.preventDefault();
@@ -393,8 +495,15 @@ export default function RankingBoard({
               onDragLeave={() => setDragOverTier(null)}
               onDrop={handleDropOnTier(tierIndex)}
             >
-              <button className="tier-label" type="button" onClick={() => setSelectedTier(tierIndex)}>
-                {tier}
+              <button
+                className="tier-label"
+                type="button"
+                title="点击加入候选"
+                aria-label={`${tier}，点击加入候选`}
+                onClick={() => setSelectedTier(tierIndex)}
+              >
+                <span className="tier-name">{tier}</span>
+                <span className="tier-hint">+候选</span>
               </button>
               <div
                 className="tier-options"
@@ -415,11 +524,18 @@ export default function RankingBoard({
                     data-item-id={!item.preview ? item.id : undefined}
                     className={`option-tile${item.preview ? ' is-preview' : ''}${
                       item.supportedPreview ? ' is-supported' : ''
-                    }`}
-                    draggable={!item.preview}
+                    }${pointerDrag?.active && pointerDrag.itemId === item.id ? ' is-dragging' : ''}`}
+                    draggable={false}
                     type="button"
-                    onClick={() => !item.preview && setSelectedItem(item)}
-                    onDragStart={() => !item.preview && setDragItem(item)}
+                    onClick={() => {
+                      if (item.preview || suppressClickRef.current) return;
+                      setSelectedItem(item);
+                    }}
+                    onPointerDown={startPointerDrag(item)}
+                    onPointerMove={movePointerDrag(item.id)}
+                    onPointerUp={finishPointerDrag(item.id)}
+                    onPointerCancel={cancelPointerDrag}
+                    onDragStart={(event) => event.preventDefault()}
                     onDragOver={(event) => event.preventDefault()}
                     onDrop={(event) => {
                       event.preventDefault();
@@ -446,7 +562,22 @@ export default function RankingBoard({
         </div>
       </div>
 
-      {dragItem ? (
+      {dragItem && pointerDrag?.active ? (
+        <div
+          className="drag-ghost"
+          style={{
+            width: `${pointerDrag.width}px`,
+            height: `${pointerDrag.height}px`,
+            transform: `translate3d(${pointerDrag.x - pointerDrag.offsetX}px, ${
+              pointerDrag.y - pointerDrag.offsetY
+            }px, 0)`
+          }}
+        >
+          <OptionImage item={dragItem} />
+        </div>
+      ) : null}
+
+      {dragItem && pointerDrag?.active ? (
         <div
           className="delete-zone"
           onDragOver={(event) => event.preventDefault()}
