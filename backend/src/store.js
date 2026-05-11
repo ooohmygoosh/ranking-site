@@ -4,6 +4,7 @@ const bcrypt = require('bcryptjs');
 const { v4: uuid } = require('uuid');
 
 const filePath = path.join(__dirname, '../data/store.json');
+const uploadDir = path.join(__dirname, '../data/uploads');
 let storeCache = null;
 const DEFAULT_TIERS = ['夯', '顶级', '人上人', 'NPC', '拉完了'];
 
@@ -21,13 +22,35 @@ function nextHourAfter(value) {
   return date;
 }
 
+function ensureUploadDir() {
+  if (!fs.existsSync(uploadDir)) fs.mkdirSync(uploadDir, { recursive: true });
+}
+
+function imageExtension(mime) {
+  if (mime === 'image/png') return 'png';
+  if (mime === 'image/webp') return 'webp';
+  if (mime === 'image/gif') return 'gif';
+  return 'jpg';
+}
+
+function persistImageUrl(value) {
+  const source = String(value || '');
+  const match = source.match(/^data:(image\/[a-zA-Z0-9.+-]+);base64,(.+)$/);
+  if (!match) return source;
+
+  ensureUploadDir();
+  const filename = `${uuid()}.${imageExtension(match[1])}`;
+  fs.writeFileSync(path.join(uploadDir, filename), Buffer.from(match[2], 'base64'));
+  return `/api/uploads/${filename}`;
+}
+
 function normalizeOption(item, index = 0) {
   const raw = typeof item === 'string' ? { name: item } : item || {};
   return {
     id: raw.id || uuid(),
     name: raw.name || raw.itemName || '新选项',
     kind: raw.kind || (raw.imageUrl ? 'image' : 'text'),
-    imageUrl: raw.imageUrl || raw.itemImageUrl || '',
+    imageUrl: persistImageUrl(raw.imageUrl || raw.itemImageUrl || ''),
     tierIndex: Number.isFinite(raw.tierIndex) ? raw.tierIndex : Math.min(index, DEFAULT_TIERS.length - 1),
     order: Number.isFinite(raw.order) ? raw.order : index
   };
@@ -40,7 +63,7 @@ function normalizeList(list) {
     id: list.id || uuid(),
     title: list.title || '从夯到拉榜单',
     description: list.description || '大家一起排序，每个整点根据意愿更新一次。',
-    coverImageUrl: list.coverImageUrl || '',
+    coverImageUrl: persistImageUrl(list.coverImageUrl || ''),
     type: 'firepower',
     tiers,
     heat: Number.isFinite(list.heat) ? list.heat : 0,
@@ -58,6 +81,11 @@ function normalizeList(list) {
 function getSummaryCoverImageUrl(list) {
   const value = list.coverImageUrl || '';
   if (value.startsWith('data:image/') && value.length > 350000) return '';
+  if (value.startsWith('/api/uploads/')) {
+    const filename = path.basename(value);
+    const fullPath = path.join(uploadDir, filename);
+    if (fs.existsSync(fullPath) && fs.statSync(fullPath).size > 350000) return '';
+  }
   return value;
 }
 
@@ -147,15 +175,19 @@ function migrateData(data) {
     if (JSON.stringify(normalized) !== JSON.stringify(list)) changed = true;
     return normalized;
   });
-  data.candidates = data.candidates.map((candidate) => ({
-    ...candidate,
-    id: candidate.id || uuid(),
-    kind: candidate.kind || (candidate.imageUrl ? 'image' : 'text'),
-    imageUrl: candidate.imageUrl || '',
-    supportUserIds: Array.isArray(candidate.supportUserIds) ? candidate.supportUserIds : [],
-    status: candidate.status || 'pending',
-    createdAt: candidate.createdAt || new Date().toISOString()
-  }));
+  data.candidates = data.candidates.map((candidate) => {
+    const normalized = {
+      ...candidate,
+      id: candidate.id || uuid(),
+      kind: candidate.kind || (candidate.imageUrl ? 'image' : 'text'),
+      imageUrl: persistImageUrl(candidate.imageUrl || ''),
+      supportUserIds: Array.isArray(candidate.supportUserIds) ? candidate.supportUserIds : [],
+      status: candidate.status || 'pending',
+      createdAt: candidate.createdAt || new Date().toISOString()
+    };
+    if (JSON.stringify(normalized) !== JSON.stringify(candidate)) changed = true;
+    return normalized;
+  });
   data.comments = data.comments.map((comment) => ({
     ...comment,
     id: comment.id || uuid(),
@@ -361,14 +393,14 @@ function updateList(id, updates) {
   if (!list) return null;
   if (updates.title) list.title = updates.title;
   if (updates.description !== undefined) list.description = updates.description;
-  if (updates.coverImageUrl !== undefined) list.coverImageUrl = updates.coverImageUrl;
+  if (updates.coverImageUrl !== undefined) list.coverImageUrl = persistImageUrl(updates.coverImageUrl);
   writeStore(data);
   return list;
 }
 
 function normalizeCandidatePayload(list, candidate, user) {
   const rawValue = String(candidate.imageUrl || candidate.name || '').trim();
-  const imageUrl = candidate.imageUrl || (isImageValue(rawValue) ? rawValue : '');
+  const imageUrl = persistImageUrl(candidate.imageUrl || (isImageValue(rawValue) ? rawValue : ''));
   return {
     id: uuid(),
     listId: list.id,

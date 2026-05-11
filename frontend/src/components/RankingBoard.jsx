@@ -481,6 +481,10 @@ export default function RankingBoard({
         </div>
       </div>
 
+      <div className="board-tip">
+        点击左侧档位名称查看候选，按住图片拖动到目标档位后松手提交本次排序。
+      </div>
+
       <div className="board-wrap" ref={boardRef}>
         <div className="tier-list">
           {tiers.map((tier, tierIndex) => (
@@ -498,12 +502,11 @@ export default function RankingBoard({
               <button
                 className="tier-label"
                 type="button"
-                title="点击加入候选"
-                aria-label={`${tier}，点击加入候选`}
+                title="点击查看候选"
+                aria-label={`${tier}，点击查看候选`}
                 onClick={() => setSelectedTier(tierIndex)}
               >
                 <span className="tier-name">{tier}</span>
-                <span className="tier-hint">+候选</span>
               </button>
               <div
                 className="tier-options"

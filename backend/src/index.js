@@ -1,4 +1,5 @@
 const express = require('express');
+const path = require('path');
 const cors = require('cors');
 const compression = require('compression');
 const bcrypt = require('bcryptjs');
@@ -10,6 +11,7 @@ const app = express();
 app.use(compression());
 app.use(cors({ origin: true }));
 app.use(express.json({ limit: '8mb' }));
+app.use('/api/uploads', express.static(path.join(__dirname, '../data/uploads'), { maxAge: '30d', immutable: true }));
 
 app.get('/api/ping', (req, res) => {
   res.json({ message: 'ranking site backend alive' });

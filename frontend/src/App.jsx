@@ -46,6 +46,32 @@ async function imageFileToOptimizedDataUrl(file, maxSize = 900, quality = 0.82) 
   });
 }
 
+function cropImageToAspect(dataUrl, aspect = 16 / 9, zoom = 1, offset = { x: 0, y: 0 }) {
+  return new Promise((resolve, reject) => {
+    const image = new Image();
+    image.onload = () => {
+      let cropWidth = image.width / zoom;
+      let cropHeight = cropWidth / aspect;
+      if (cropHeight > image.height / zoom) {
+        cropHeight = image.height / zoom;
+        cropWidth = cropHeight * aspect;
+      }
+
+      const maxX = Math.max(1, (image.width - cropWidth) / 2);
+      const maxY = Math.max(1, (image.height - cropHeight) / 2);
+      const sx = Math.max(0, Math.min(image.width - cropWidth, (image.width - cropWidth) / 2 - offset.x * maxX));
+      const sy = Math.max(0, Math.min(image.height - cropHeight, (image.height - cropHeight) / 2 - offset.y * maxY));
+      const canvas = document.createElement('canvas');
+      canvas.width = 640;
+      canvas.height = 360;
+      canvas.getContext('2d').drawImage(image, sx, sy, cropWidth, cropHeight, 0, 0, 640, 360);
+      resolve(canvas.toDataURL('image/jpeg', 0.82));
+    };
+    image.onerror = reject;
+    image.src = dataUrl;
+  });
+}
+
 function makeAccount() {
   const suffix = Math.random().toString(36).slice(2, 8);
   return {
@@ -92,6 +118,10 @@ function App() {
   const [newTitle, setNewTitle] = useState('');
   const [newDescription, setNewDescription] = useState('');
   const [newCoverImageUrl, setNewCoverImageUrl] = useState('');
+  const [coverCropDraft, setCoverCropDraft] = useState(null);
+  const [coverCropZoom, setCoverCropZoom] = useState(1);
+  const [coverCropOffset, setCoverCropOffset] = useState({ x: 0, y: 0 });
+  const [coverCropDrag, setCoverCropDrag] = useState(null);
   const [generatedAccount, setGeneratedAccount] = useState(savedAccount || makeAccount());
   const creatingListRef = useRef(false);
   const coverInputRef = useRef(null);
@@ -297,7 +327,15 @@ function App() {
 
   const handleCoverFile = async (file) => {
     if (!file || !file.type.startsWith('image/')) return;
-    setNewCoverImageUrl(await imageFileToOptimizedDataUrl(file, 520, 0.8));
+    setCoverCropZoom(1);
+    setCoverCropOffset({ x: 0, y: 0 });
+    setCoverCropDraft(await fileToDataUrl(file));
+  };
+
+  const confirmCoverCrop = async () => {
+    if (!coverCropDraft) return;
+    setNewCoverImageUrl(await cropImageToAspect(coverCropDraft, 16 / 9, coverCropZoom, coverCropOffset));
+    setCoverCropDraft(null);
   };
 
   const handleCreateList = async (event) => {
@@ -497,6 +535,59 @@ function App() {
               创建并进入
             </button>
           </form>
+        </div>
+      ) : null}
+
+      {coverCropDraft ? (
+        <div className="crop-modal">
+          <div className="crop-box">
+            <div className="drawer-header">
+              <strong>裁剪榜单封面</strong>
+              <button className="icon-btn" type="button" onClick={() => setCoverCropDraft(null)}>
+                x
+              </button>
+            </div>
+            <div
+              className="crop-preview cover-crop-preview"
+              onPointerDown={(event) => {
+                event.currentTarget.setPointerCapture(event.pointerId);
+                setCoverCropDrag({ x: event.clientX, y: event.clientY, offset: coverCropOffset });
+              }}
+              onPointerMove={(event) => {
+                if (!coverCropDrag) return;
+                const nextX = coverCropDrag.offset.x + (event.clientX - coverCropDrag.x) / 140;
+                const nextY = coverCropDrag.offset.y + (event.clientY - coverCropDrag.y) / 140;
+                setCoverCropOffset({
+                  x: Math.max(-1, Math.min(1, nextX)),
+                  y: Math.max(-1, Math.min(1, nextY))
+                });
+              }}
+              onPointerUp={() => setCoverCropDrag(null)}
+              onPointerCancel={() => setCoverCropDrag(null)}
+            >
+              <img
+                src={coverCropDraft}
+                alt="待裁剪封面"
+                style={{
+                  transform: `translate(${coverCropOffset.x * 38}px, ${coverCropOffset.y * 38}px) scale(${coverCropZoom})`
+                }}
+              />
+            </div>
+            <label className="crop-slider">
+              缩放
+              <input
+                type="range"
+                min="1"
+                max="2.5"
+                step="0.05"
+                value={coverCropZoom}
+                onChange={(event) => setCoverCropZoom(Number(event.target.value))}
+              />
+            </label>
+            <button className="btn primary" type="button" onClick={confirmCoverCrop}>
+              使用这张封面
+            </button>
+          </div>
         </div>
       ) : null}
 
