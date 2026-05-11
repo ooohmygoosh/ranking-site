@@ -3,6 +3,9 @@ dist/
 frontend/node_modules/
 frontend/dist/
 backend/node_modules/
+backend/data/store.json
 *.log
 .DS_Store
 .env
+/.deploy_ssh/
+ranking-site-deploy.tar.gz
