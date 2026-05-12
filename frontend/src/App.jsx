@@ -12,14 +12,14 @@ import {
   createCommentApi,
   likeCommentApi,
   getAdminOverviewApi,
+  createCandidateApi,
   deleteAdminListApi,
   deleteAdminSubmissionApi,
   deleteAdminCandidateApi,
   deleteAdminCommentApi,
   deleteAdminUserApi,
   updateAdminUserRoleApi,
-  settleAdminListApi,
-  seedAdminListMemesApi
+  settleAdminListApi
 } from './services/api';
 
 function fileToDataUrl(file) {
@@ -127,6 +127,7 @@ function App() {
   const [generatedAccount, setGeneratedAccount] = useState(savedAccount || makeAccount());
   const creatingListRef = useRef(false);
   const coverInputRef = useRef(null);
+  const pendingRankingRef = useRef({ dirty: false, payload: null });
 
   async function loadHome() {
     setHomeLoading(true);
@@ -243,7 +244,8 @@ function App() {
     }
   };
 
-  const handleLogout = () => {
+  const clearSession = () => {
+    pendingRankingRef.current = { dirty: false, payload: null };
     setToken('');
     localStorage.removeItem('authToken');
     setUser(null);
@@ -253,8 +255,22 @@ function App() {
     setAdminMode(false);
   };
 
+  const handleLogout = async () => {
+    const pendingRanking = pendingRankingRef.current;
+    if (activeList && pendingRanking?.dirty && pendingRanking.payload) {
+      try {
+        await submitRankingApi(activeList.id, pendingRanking.payload);
+      } catch (err) {
+        setMessage(err.message || '退出前自动提交失败');
+        return;
+      }
+    }
+    clearSession();
+  };
+
   const handleOpenList = async (listId) => {
     try {
+      pendingRankingRef.current = { dirty: false, payload: null };
       setAdminMode(false);
       setActiveList(null);
       setSummary(null);
@@ -275,6 +291,19 @@ function App() {
     } catch (err) {
       setMessage(err.message || '提交失败');
     }
+  };
+
+  const handlePendingRankingChange = (snapshot) => {
+    pendingRankingRef.current = snapshot || { dirty: false, payload: null };
+  };
+
+  const handleCreateCandidate = async (payload) => {
+    if (!activeList) return null;
+    const candidate = await createCandidateApi(activeList.id, payload);
+    await loadDetail(activeList.id);
+    await loadHome();
+    if (adminMode && user?.isAdmin) await loadAdmin();
+    return candidate;
   };
 
   const handleCreateComment = async (content) => {
@@ -336,18 +365,6 @@ function App() {
       if (activeList?.id === listId) await loadDetail(listId);
     } catch (err) {
       setMessage(err.message || '立即推送失败');
-    }
-  };
-
-  const handleAdminSeedMemes = async (listId) => {
-    try {
-      const result = await seedAdminListMemesApi(listId);
-      setMessage(`已导入 ${result.addedCount || 0} 个梗候选`);
-      await loadAdmin();
-      await loadHome();
-      if (activeList?.id === listId) await loadDetail(listId);
-    } catch (err) {
-      setMessage(err.message || '导入压力数据失败');
     }
   };
 
@@ -453,7 +470,6 @@ function App() {
           onDelete={handleAdminDelete}
           onToggleUserRole={handleAdminRoleChange}
           onSettleList={handleAdminSettleList}
-          onSeedMemes={handleAdminSeedMemes}
         />
       ) : detailLoading && !activeList ? (
         <main className="detail-page">
@@ -506,6 +522,8 @@ function App() {
             comments={comments}
             onBack={() => setActiveList(null)}
             onSubmitRanking={handleSubmitRanking}
+            onPendingChange={handlePendingRankingChange}
+            onCreateCandidate={handleCreateCandidate}
             onCreateComment={handleCreateComment}
             onLikeComment={handleLikeComment}
           />
@@ -755,7 +773,7 @@ function QuickStart({ account, setAccount, onStart, onLogin, message }) {
   );
 }
 
-function AdminPanel({ data, onRefresh, onDelete, onToggleUserRole, onSettleList, onSeedMemes }) {
+function AdminPanel({ data, onRefresh, onDelete, onToggleUserRole, onSettleList }) {
   const [tab, setTab] = useState('lists');
 
   if (!data) {
@@ -816,7 +834,6 @@ function AdminPanel({ data, onRefresh, onDelete, onToggleUserRole, onSettleList,
           rows={data.lists}
           onDelete={(id) => onDelete('list', id)}
           onSettle={onSettleList}
-          onSeedMemes={onSeedMemes}
         />
       ) : null}
       {tab === 'submissions' ? (
@@ -840,7 +857,7 @@ function Stat({ label, value }) {
   );
 }
 
-function ListTable({ rows, onDelete, onSettle, onSeedMemes }) {
+function ListTable({ rows, onDelete, onSettle }) {
   return (
     <section className="admin-table">
       <div className="admin-table-head list-cols">
@@ -862,9 +879,6 @@ function ListTable({ rows, onDelete, onSettle, onSeedMemes }) {
           </span>
           <span>{formatDate(row.nextSettlementAt)}</span>
           <div className="admin-actions">
-            <button className="btn secondary" type="button" onClick={() => onSeedMemes(row.id)}>
-              导入梗
-            </button>
             <button className="btn primary" type="button" onClick={() => onSettle(row.id)}>
               立即推送
             </button>

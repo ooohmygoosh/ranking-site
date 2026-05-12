@@ -123,6 +123,8 @@ export default function RankingBoard({
   comments,
   onBack,
   onSubmitRanking,
+  onPendingChange,
+  onCreateCandidate,
   onCreateComment,
   onLikeComment
 }) {
@@ -137,6 +139,7 @@ export default function RankingBoard({
   const [selectedItem, setSelectedItem] = useState(null);
   const [selectedTier, setSelectedTier] = useState(null);
   const [candidateValue, setCandidateValue] = useState('');
+  const [candidateSubmitting, setCandidateSubmitting] = useState(false);
   const [commentValue, setCommentValue] = useState('');
   const [cropDraft, setCropDraft] = useState(null);
   const [cropZoom, setCropZoom] = useState(1);
@@ -283,6 +286,7 @@ export default function RankingBoard({
   const removeItem = (itemId) => {
     setDraftItems((items) => normalizeOrders(items.filter((item) => item.id !== itemId)));
     setDeletedIds((ids) => (ids.includes(itemId) ? ids : [...ids, itemId]));
+    setSelectedItem((item) => (item?.id === itemId ? null : item));
   };
 
   const handleDropOnTier = (tierIndex) => (event) => {
@@ -392,27 +396,54 @@ export default function RankingBoard({
     ]);
   };
 
+  const createCandidateNow = async (candidate) => {
+    if (selectedTier === null || !onCreateCandidate) {
+      addDraftCandidate(candidate);
+      return;
+    }
+    setCandidateSubmitting(true);
+    try {
+      await onCreateCandidate({
+        ...candidate,
+        tierIndex: selectedTier
+      });
+    } finally {
+      setCandidateSubmitting(false);
+    }
+  };
+
   const stageSupportCandidate = (candidate) => {
     setSupportedCandidateIds((ids) => (ids.includes(candidate.id) ? ids : [...ids, candidate.id]));
   };
 
+  const buildSubmissionPayload = () => ({
+    placements: draftItems.map((item) => ({
+      itemId: item.id,
+      tierIndex: clampTier(item.tierIndex, tiers)
+    })),
+    deleteItemIds: deletedIds,
+    candidates: draftCandidates.map(({ id, local, supportCount, preview, ...candidate }) => candidate),
+    supportCandidateIds: supportedCandidateIds
+  });
+
+  useEffect(() => {
+    onPendingChange?.({
+      dirty,
+      payload: dirty ? buildSubmissionPayload() : null
+    });
+  }, [deletedIds, dirty, draftCandidates, draftItems, onPendingChange, supportedCandidateIds, tiers]);
+
   const submitRanking = () => {
     onSubmitRanking({
-      placements: draftItems.map((item) => ({
-        itemId: item.id,
-        tierIndex: clampTier(item.tierIndex, tiers)
-      })),
-      deleteItemIds: deletedIds,
-      candidates: draftCandidates.map(({ id, local, supportCount, preview, ...candidate }) => candidate),
-      supportCandidateIds: supportedCandidateIds
+      ...buildSubmissionPayload()
     });
   };
 
-  const submitCandidate = (event) => {
+  const submitCandidate = async (event) => {
     event.preventDefault();
     const value = candidateValue.trim();
-    if (selectedTier === null || !value) return;
-    addDraftCandidate({
+    if (selectedTier === null || !value || candidateSubmitting) return;
+    await createCandidateNow({
       name: isImageValue(value) ? '图片选项' : value,
       kind: isImageValue(value) ? 'image' : 'text',
       imageUrl: isImageValue(value) ? value : ''
@@ -428,9 +459,9 @@ export default function RankingBoard({
   };
 
   const confirmCrop = async () => {
-    if (!cropDraft) return;
+    if (!cropDraft || candidateSubmitting) return;
     const imageUrl = await cropSquare(cropDraft, cropZoom, cropOffset);
-    addDraftCandidate({ name: '图片选项', kind: 'image', imageUrl });
+    await createCandidateNow({ name: '图片选项', kind: 'image', imageUrl });
     setCropDraft(null);
   };
 
@@ -475,6 +506,7 @@ export default function RankingBoard({
       <div className="board-actions">
         <span>
           {summary?.pendingSubmissionCount || 0} 份待结算排序意愿
+          {deletedIds.length > 0 ? ` · 本次删除 ${deletedIds.length} 个选项` : ''}
           {draftCandidates.length > 0 ? ` · 本次新增 ${draftCandidates.length} 个候选` : ''}
           {supportedCandidateIds.length > 0 ? ` · 本次支持 ${supportedCandidateIds.length} 个候选` : ''}
         </span>
@@ -640,6 +672,14 @@ export default function RankingBoard({
             </button>
           </div>
           <OptionImage item={selectedItem} />
+          <button
+            className="btn danger"
+            type="button"
+            disabled={deletedIds.includes(selectedItem.id)}
+            onClick={() => removeItem(selectedItem.id)}
+          >
+            {deletedIds.includes(selectedItem.id) ? '已加入本次删除意愿' : '本次希望删除'}
+          </button>
           <div className="intent-list">
             {tiers.map((tier, index) => {
               const count = itemIntent?.targetCounts?.[index] || 0;
@@ -725,7 +765,7 @@ export default function RankingBoard({
               placeholder="输入文字，或粘贴图片 URL"
             />
             <button className="btn primary" type="submit">
-              加入本次表单
+              {candidateSubmitting ? '提交中' : '加入候选'}
             </button>
           </form>
           <div
@@ -796,7 +836,7 @@ export default function RankingBoard({
               />
             </label>
             <button className="btn primary" type="button" onClick={confirmCrop}>
-              使用这张正方形图片
+              {candidateSubmitting ? '提交中' : '使用这张正方形图片'}
             </button>
           </div>
         </div>
