@@ -255,17 +255,33 @@ function App() {
     setAdminMode(false);
   };
 
-  const handleLogout = async () => {
+  const flushPendingRanking = async () => {
     const pendingRanking = pendingRankingRef.current;
-    if (activeList && pendingRanking?.dirty && pendingRanking.payload) {
-      try {
-        await submitRankingApi(activeList.id, pendingRanking.payload);
-      } catch (err) {
-        setMessage(err.message || '退出前自动提交失败');
-        return;
-      }
+    if (!activeList || !pendingRanking?.dirty || !pendingRanking.payload) return true;
+    try {
+      await submitRankingApi(activeList.id, pendingRanking.payload);
+      pendingRankingRef.current = { dirty: false, payload: null };
+      await loadHome();
+      return true;
+    } catch (err) {
+      setMessage(err.message || '离开前自动提交失败');
+      return false;
     }
+  };
+
+  const handleLogout = async () => {
+    const submitted = await flushPendingRanking();
+    if (!submitted) return;
     clearSession();
+  };
+
+  const handleLeaveRanking = async ({ nextAdminMode = false } = {}) => {
+    const submitted = await flushPendingRanking();
+    if (!submitted) return;
+    setActiveList(null);
+    setSummary(null);
+    setComments([]);
+    setAdminMode(nextAdminMode);
   };
 
   const handleOpenList = async (listId) => {
@@ -435,10 +451,7 @@ function App() {
         <button
           className="brand-block"
           type="button"
-          onClick={() => {
-            setActiveList(null);
-            setAdminMode(false);
-          }}
+          onClick={() => handleLeaveRanking({ nextAdminMode: false })}
         >
           <span className="brand-mark">夯</span>
           <span>从夯到拉</span>
@@ -449,10 +462,7 @@ function App() {
             <button
               className="btn secondary"
               type="button"
-              onClick={() => {
-                setActiveList(null);
-                setAdminMode((value) => !value);
-              }}
+              onClick={() => handleLeaveRanking({ nextAdminMode: !adminMode })}
             >
               {adminMode ? '前台' : '后台'}
             </button>
@@ -520,7 +530,7 @@ function App() {
             list={activeList}
             summary={summary}
             comments={comments}
-            onBack={() => setActiveList(null)}
+            onBack={() => handleLeaveRanking({ nextAdminMode: false })}
             onSubmitRanking={handleSubmitRanking}
             onPendingChange={handlePendingRankingChange}
             onCreateCandidate={handleCreateCandidate}
