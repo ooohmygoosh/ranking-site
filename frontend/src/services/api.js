@@ -122,6 +122,13 @@ export function settleAdminListApi(listId) {
   });
 }
 
+export function seedAdminListMemesApi(listId) {
+  return request(`/admin/lists/${encodeURIComponent(listId)}/stress-memes`, {
+    method: 'POST',
+    body: JSON.stringify({})
+  });
+}
+
 export function createCandidateApi(listId, payload) {
   return request(`/lists/${encodeURIComponent(listId)}/candidates`, {
     method: 'POST',

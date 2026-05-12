@@ -18,7 +18,8 @@ import {
   deleteAdminCommentApi,
   deleteAdminUserApi,
   updateAdminUserRoleApi,
-  settleAdminListApi
+  settleAdminListApi,
+  seedAdminListMemesApi
 } from './services/api';
 
 function fileToDataUrl(file) {
@@ -338,6 +339,18 @@ function App() {
     }
   };
 
+  const handleAdminSeedMemes = async (listId) => {
+    try {
+      const result = await seedAdminListMemesApi(listId);
+      setMessage(`已导入 ${result.addedCount || 0} 个梗候选`);
+      await loadAdmin();
+      await loadHome();
+      if (activeList?.id === listId) await loadDetail(listId);
+    } catch (err) {
+      setMessage(err.message || '导入压力数据失败');
+    }
+  };
+
   const handleCoverFile = async (file) => {
     if (!file || !file.type.startsWith('image/')) return;
     setCoverCropZoom(1);
@@ -440,6 +453,7 @@ function App() {
           onDelete={handleAdminDelete}
           onToggleUserRole={handleAdminRoleChange}
           onSettleList={handleAdminSettleList}
+          onSeedMemes={handleAdminSeedMemes}
         />
       ) : detailLoading && !activeList ? (
         <main className="detail-page">
@@ -741,7 +755,7 @@ function QuickStart({ account, setAccount, onStart, onLogin, message }) {
   );
 }
 
-function AdminPanel({ data, onRefresh, onDelete, onToggleUserRole, onSettleList }) {
+function AdminPanel({ data, onRefresh, onDelete, onToggleUserRole, onSettleList, onSeedMemes }) {
   const [tab, setTab] = useState('lists');
 
   if (!data) {
@@ -802,6 +816,7 @@ function AdminPanel({ data, onRefresh, onDelete, onToggleUserRole, onSettleList 
           rows={data.lists}
           onDelete={(id) => onDelete('list', id)}
           onSettle={onSettleList}
+          onSeedMemes={onSeedMemes}
         />
       ) : null}
       {tab === 'submissions' ? (
@@ -825,7 +840,7 @@ function Stat({ label, value }) {
   );
 }
 
-function ListTable({ rows, onDelete, onSettle }) {
+function ListTable({ rows, onDelete, onSettle, onSeedMemes }) {
   return (
     <section className="admin-table">
       <div className="admin-table-head list-cols">
@@ -847,6 +862,9 @@ function ListTable({ rows, onDelete, onSettle }) {
           </span>
           <span>{formatDate(row.nextSettlementAt)}</span>
           <div className="admin-actions">
+            <button className="btn secondary" type="button" onClick={() => onSeedMemes(row.id)}>
+              导入梗
+            </button>
             <button className="btn primary" type="button" onClick={() => onSettle(row.id)}>
               立即推送
             </button>
