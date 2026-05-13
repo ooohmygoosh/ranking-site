@@ -183,9 +183,13 @@ async function downloadElementAsPng(node, filename) {
       } catch (error) {
         reject(error);
       }
+      URL.revokeObjectURL(image.src);
     };
-    image.onerror = reject;
-    image.src = `data:image/svg+xml;charset=utf-8,${encodeURIComponent(svg)}`;
+    image.onerror = () => {
+      URL.revokeObjectURL(image.src);
+      reject(new Error('截图画布渲染失败'));
+    };
+    image.src = URL.createObjectURL(new Blob([svg], { type: 'image/svg+xml;charset=utf-8' }));
   });
 }
 
