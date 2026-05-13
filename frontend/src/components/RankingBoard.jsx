@@ -93,6 +93,7 @@ function blobToDataUrl(blob) {
 async function inlineCloneImages(sourceNode, cloneNode) {
   const sourceImages = Array.from(sourceNode.querySelectorAll('img'));
   const cloneImages = Array.from(cloneNode.querySelectorAll('img'));
+  const failedSources = [];
 
   await Promise.all(
     cloneImages.map(async (cloneImage, index) => {
@@ -110,13 +111,44 @@ async function inlineCloneImages(sourceNode, cloneNode) {
 
       try {
         const response = await fetch(source, { credentials: 'same-origin' });
-        if (!response.ok) return;
+        if (!response.ok) {
+          failedSources.push(source);
+          return;
+        }
         cloneImage.src = await blobToDataUrl(await response.blob());
       } catch {
-        // Cross-origin images without CORS cannot be embedded into the exported PNG.
+        failedSources.push(source);
       }
     })
   );
+
+  if (failedSources.length > 0) {
+    throw new Error('有图片无法写入截图，请改用本站上传的图片后再保存');
+  }
+}
+
+function canvasToBlob(canvas) {
+  return new Promise((resolve, reject) => {
+    canvas.toBlob((blob) => {
+      if (blob) {
+        resolve(blob);
+        return;
+      }
+      reject(new Error('截图文件生成失败'));
+    }, 'image/png');
+  });
+}
+
+function downloadBlob(blob, filename) {
+  const objectUrl = URL.createObjectURL(blob);
+  const link = document.createElement('a');
+  link.download = filename;
+  link.href = objectUrl;
+  link.style.display = 'none';
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+  window.setTimeout(() => URL.revokeObjectURL(objectUrl), 1000);
 }
 
 async function downloadElementAsPng(node, filename) {
@@ -140,16 +172,17 @@ async function downloadElementAsPng(node, filename) {
 
   return new Promise((resolve, reject) => {
     const image = new Image();
-    image.onload = () => {
-      const canvas = document.createElement('canvas');
-      canvas.width = width;
-      canvas.height = height;
-      canvas.getContext('2d').drawImage(image, 0, 0);
-      const link = document.createElement('a');
-      link.download = filename;
-      link.href = canvas.toDataURL('image/png');
-      link.click();
-      resolve();
+    image.onload = async () => {
+      try {
+        const canvas = document.createElement('canvas');
+        canvas.width = width;
+        canvas.height = height;
+        canvas.getContext('2d').drawImage(image, 0, 0);
+        downloadBlob(await canvasToBlob(canvas), filename);
+        resolve();
+      } catch (error) {
+        reject(error);
+      }
     };
     image.onerror = reject;
     image.src = `data:image/svg+xml;charset=utf-8,${encodeURIComponent(svg)}`;
@@ -506,7 +539,11 @@ export default function RankingBoard({
 
   const saveScreenshot = async () => {
     if (!boardRef.current) return;
-    await downloadElementAsPng(boardRef.current, `${list.title || 'ranking'}-${Date.now()}.png`);
+    try {
+      await downloadElementAsPng(boardRef.current, `${list.title || 'ranking'}-${Date.now()}.png`);
+    } catch (error) {
+      window.alert(error.message || '保存截图失败');
+    }
   };
 
   const submitComment = (event) => {
