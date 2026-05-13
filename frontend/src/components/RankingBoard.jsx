@@ -67,66 +67,6 @@ function OptionImage({ item }) {
   );
 }
 
-function collectPageCss() {
-  return Array.from(document.styleSheets)
-    .map((sheet) => {
-      try {
-        return Array.from(sheet.cssRules || [])
-          .map((rule) => rule.cssText)
-          .join('\n');
-      } catch {
-        return '';
-      }
-    })
-    .join('\n');
-}
-
-function blobToDataUrl(blob) {
-  return new Promise((resolve, reject) => {
-    const reader = new FileReader();
-    reader.onload = () => resolve(reader.result);
-    reader.onerror = reject;
-    reader.readAsDataURL(blob);
-  });
-}
-
-async function inlineCloneImages(sourceNode, cloneNode) {
-  const sourceImages = Array.from(sourceNode.querySelectorAll('img'));
-  const cloneImages = Array.from(cloneNode.querySelectorAll('img'));
-  const failedSources = [];
-
-  await Promise.all(
-    cloneImages.map(async (cloneImage, index) => {
-      const sourceImage = sourceImages[index];
-      const source = sourceImage?.currentSrc || sourceImage?.src || cloneImage.src;
-      if (!source) return;
-
-      cloneImage.removeAttribute('loading');
-      cloneImage.removeAttribute('decoding');
-
-      if (source.startsWith('data:image/')) {
-        cloneImage.src = source;
-        return;
-      }
-
-      try {
-        const response = await fetch(source, { credentials: 'same-origin' });
-        if (!response.ok) {
-          failedSources.push(source);
-          return;
-        }
-        cloneImage.src = await blobToDataUrl(await response.blob());
-      } catch {
-        failedSources.push(source);
-      }
-    })
-  );
-
-  if (failedSources.length > 0) {
-    throw new Error('有图片无法写入截图，请改用本站上传的图片后再保存');
-  }
-}
-
 function canvasToBlob(canvas) {
   return new Promise((resolve, reject) => {
     canvas.toBlob((blob) => {
@@ -151,46 +91,122 @@ function downloadBlob(blob, filename) {
   window.setTimeout(() => URL.revokeObjectURL(objectUrl), 1000);
 }
 
-async function downloadElementAsPng(node, filename) {
-  const width = Math.ceil(node.scrollWidth);
-  const height = Math.ceil(node.scrollHeight);
-  const clone = node.cloneNode(true);
-  clone.style.width = `${width}px`;
-  clone.style.height = `${height}px`;
-  await inlineCloneImages(node, clone);
-  const html = `
-    <div xmlns="http://www.w3.org/1999/xhtml" style="width:${width}px;min-height:${height}px;background:#e9ece8;">
-      <style>${collectPageCss()}</style>
-      ${clone.outerHTML}
-    </div>
-  `;
-  const svg = `
-    <svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${height}">
-      <foreignObject width="100%" height="100%">${html}</foreignObject>
-    </svg>
-  `;
+function relativeRect(node, element) {
+  const nodeRect = node.getBoundingClientRect();
+  const rect = element.getBoundingClientRect();
+  return {
+    x: rect.left - nodeRect.left + node.scrollLeft,
+    y: rect.top - nodeRect.top + node.scrollTop,
+    width: rect.width,
+    height: rect.height
+  };
+}
 
+function drawBorderedRect(context, rect, fillStyle, strokeStyle = '#151515', lineWidth = 2) {
+  context.fillStyle = fillStyle;
+  context.fillRect(rect.x, rect.y, rect.width, rect.height);
+  context.lineWidth = lineWidth;
+  context.strokeStyle = strokeStyle;
+  context.strokeRect(rect.x + lineWidth / 2, rect.y + lineWidth / 2, rect.width - lineWidth, rect.height - lineWidth);
+}
+
+function loadExportImage(source) {
   return new Promise((resolve, reject) => {
     const image = new Image();
-    image.onload = async () => {
-      try {
-        const canvas = document.createElement('canvas');
-        canvas.width = width;
-        canvas.height = height;
-        canvas.getContext('2d').drawImage(image, 0, 0);
-        downloadBlob(await canvasToBlob(canvas), filename);
-        resolve();
-      } catch (error) {
-        reject(error);
-      }
-      URL.revokeObjectURL(image.src);
-    };
-    image.onerror = () => {
-      URL.revokeObjectURL(image.src);
-      reject(new Error('截图画布渲染失败'));
-    };
-    image.src = URL.createObjectURL(new Blob([svg], { type: 'image/svg+xml;charset=utf-8' }));
+    image.onload = () => resolve(image);
+    image.onerror = () => reject(new Error('榜单图片加载失败'));
+    image.src = source;
   });
+}
+
+function drawCoverImage(context, image, rect) {
+  const scale = Math.max(rect.width / image.naturalWidth, rect.height / image.naturalHeight);
+  const sourceWidth = rect.width / scale;
+  const sourceHeight = rect.height / scale;
+  const sourceX = Math.max(0, (image.naturalWidth - sourceWidth) / 2);
+  const sourceY = Math.max(0, (image.naturalHeight - sourceHeight) / 2);
+  context.drawImage(
+    image,
+    sourceX,
+    sourceY,
+    sourceWidth,
+    sourceHeight,
+    rect.x,
+    rect.y,
+    rect.width,
+    rect.height
+  );
+}
+
+function fitText(context, text, maxWidth, preferredSize, minimumSize = 16) {
+  let size = preferredSize;
+  while (size > minimumSize) {
+    context.font = `950 ${size}px Arial, sans-serif`;
+    if (context.measureText(text).width <= maxWidth) return size;
+    size -= 1;
+  }
+  return minimumSize;
+}
+
+function drawCenteredText(context, text, rect, preferredSize, color = '#151515') {
+  const fontSize = fitText(context, text, rect.width - 16, preferredSize);
+  context.font = `950 ${fontSize}px Arial, sans-serif`;
+  context.fillStyle = color;
+  context.textAlign = 'center';
+  context.textBaseline = 'middle';
+  context.fillText(text, rect.x + rect.width / 2, rect.y + rect.height / 2);
+}
+
+async function downloadElementAsPng(node, filename) {
+  const canvas = document.createElement('canvas');
+  canvas.width = Math.ceil(node.scrollWidth);
+  canvas.height = Math.ceil(node.scrollHeight);
+  const context = canvas.getContext('2d');
+  context.fillStyle = '#e9ece8';
+  context.fillRect(0, 0, canvas.width, canvas.height);
+
+  const rows = Array.from(node.querySelectorAll('.tier-row'));
+  rows.forEach((row) => {
+    const rowRect = relativeRect(node, row);
+    const label = row.querySelector('.tier-label');
+    const labelRect = relativeRect(node, label);
+    const rowStyle = getComputedStyle(row);
+    const labelStyle = getComputedStyle(label);
+
+    drawBorderedRect(context, rowRect, rowStyle.backgroundColor || '#c7c8c3');
+    drawBorderedRect(context, labelRect, labelStyle.backgroundColor || '#ffffff');
+    drawCenteredText(context, label.textContent?.trim() || '', labelRect, 30);
+  });
+
+  const tiles = Array.from(node.querySelectorAll('.option-tile'));
+  for (const tile of tiles) {
+    const tileRect = relativeRect(node, tile);
+    drawBorderedRect(context, tileRect, '#ffffff');
+
+    const imageElement = tile.querySelector('img');
+    if (imageElement) {
+      const source = imageElement.currentSrc || imageElement.src;
+      const image = await loadExportImage(source);
+      drawCoverImage(context, image, {
+        x: tileRect.x + 2,
+        y: tileRect.y + 2,
+        width: tileRect.width - 4,
+        height: tileRect.height - 4
+      });
+      continue;
+    }
+
+    const text = tile.textContent?.trim() || '';
+    drawCenteredText(
+      context,
+      text,
+      { x: tileRect.x + 4, y: tileRect.y + 4, width: tileRect.width - 8, height: tileRect.height - 8 },
+      18,
+      '#000000'
+    );
+  }
+
+  downloadBlob(await canvasToBlob(canvas), filename);
 }
 
 export default function RankingBoard({
