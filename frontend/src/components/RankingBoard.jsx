@@ -81,12 +81,51 @@ function collectPageCss() {
     .join('\n');
 }
 
-function downloadElementAsPng(node, filename) {
+function blobToDataUrl(blob) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(reader.result);
+    reader.onerror = reject;
+    reader.readAsDataURL(blob);
+  });
+}
+
+async function inlineCloneImages(sourceNode, cloneNode) {
+  const sourceImages = Array.from(sourceNode.querySelectorAll('img'));
+  const cloneImages = Array.from(cloneNode.querySelectorAll('img'));
+
+  await Promise.all(
+    cloneImages.map(async (cloneImage, index) => {
+      const sourceImage = sourceImages[index];
+      const source = sourceImage?.currentSrc || sourceImage?.src || cloneImage.src;
+      if (!source) return;
+
+      cloneImage.removeAttribute('loading');
+      cloneImage.removeAttribute('decoding');
+
+      if (source.startsWith('data:image/')) {
+        cloneImage.src = source;
+        return;
+      }
+
+      try {
+        const response = await fetch(source, { credentials: 'same-origin' });
+        if (!response.ok) return;
+        cloneImage.src = await blobToDataUrl(await response.blob());
+      } catch {
+        // Cross-origin images without CORS cannot be embedded into the exported PNG.
+      }
+    })
+  );
+}
+
+async function downloadElementAsPng(node, filename) {
   const width = Math.ceil(node.scrollWidth);
   const height = Math.ceil(node.scrollHeight);
   const clone = node.cloneNode(true);
   clone.style.width = `${width}px`;
   clone.style.height = `${height}px`;
+  await inlineCloneImages(node, clone);
   const html = `
     <div xmlns="http://www.w3.org/1999/xhtml" style="width:${width}px;min-height:${height}px;background:#e9ece8;">
       <style>${collectPageCss()}</style>
